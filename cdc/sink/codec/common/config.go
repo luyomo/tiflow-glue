@@ -41,6 +41,9 @@ type Config struct {
 	AvroDecimalHandlingMode        string
 	AvroBigintUnsignedHandlingMode string
 
+	// glue avro
+	AvroGlueSchemaRegistry         string
+
 	// for sinking to cloud storage
 	Delimiter       string
 	Quote           string
@@ -59,6 +62,7 @@ func NewConfig(protocol config.Protocol) *Config {
 
 		EnableTiDBExtension:            false,
 		AvroSchemaRegistry:             "",
+                AvroGlueSchemaRegistry:         "",
 		AvroDecimalHandlingMode:        "precise",
 		AvroBigintUnsignedHandlingMode: "long",
 	}
@@ -71,6 +75,7 @@ const (
 	codecOPTAvroDecimalHandlingMode        = "avro-decimal-handling-mode"
 	codecOPTAvroBigintUnsignedHandlingMode = "avro-bigint-unsigned-handling-mode"
 	codecOPTAvroSchemaRegistry             = "schema-registry"
+	codecOPTAvroGlueSchemaRegistry         = "glue-schema-registry"
 )
 
 const (
@@ -123,6 +128,10 @@ func (c *Config) Apply(sinkURI *url.URL, config *config.ReplicaConfig) error {
 		c.AvroSchemaRegistry = config.Sink.SchemaRegistry
 	}
 
+	if config.Sink != nil && config.Sink.GlueSchemaRegistry != "" {
+		c.AvroGlueSchemaRegistry = config.Sink.GlueSchemaRegistry
+	}
+
 	if config.Sink != nil {
 		c.Terminator = config.Sink.Terminator
 		if config.Sink.CSVConfig != nil {
@@ -152,10 +161,11 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Protocol == config.ProtocolAvro {
-		if c.AvroSchemaRegistry == "" {
+		if c.AvroSchemaRegistry == "" && c.AvroGlueSchemaRegistry == "" {
 			return cerror.ErrCodecInvalidConfig.GenWithStack(
-				`Avro protocol requires parameter "%s"`,
+				`Avro protocol requires parameter "%s" or "%s"`,
 				codecOPTAvroSchemaRegistry,
+                                codecOPTAvroGlueSchemaRegistry,
 			)
 		}
 

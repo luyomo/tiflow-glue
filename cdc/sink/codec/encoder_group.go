@@ -26,6 +26,8 @@ import (
 	"github.com/pingcap/tiflow/cdc/sinkv2/eventsink"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+
+	"runtime/debug"
 )
 
 const (
@@ -79,6 +81,8 @@ func NewEncoderGroup(builder EncoderBuilder, count int, changefeedID model.Chang
 }
 
 func (g *encoderGroup) Run(ctx context.Context) error {
+        debug.PrintStack()
+        log.Info("DEBUG Info 03:",zap.String("stack",  string(debug.Stack())))
 	defer func() {
 		encoderGroupInputChanSizeGauge.DeleteLabelValues(g.changefeedID.Namespace, g.changefeedID.ID)
 		log.Info("encoder group exited",
@@ -101,6 +105,8 @@ func (g *encoderGroup) runEncoder(ctx context.Context, idx int) error {
 	metric := encoderGroupInputChanSizeGauge.
 		WithLabelValues(g.changefeedID.Namespace, g.changefeedID.ID, strconv.Itoa(idx))
 	ticker := time.NewTicker(defaultMetricInterval)
+        debug.PrintStack()
+        log.Info("DEBUG Info 02:",zap.String("stack",  string(debug.Stack())))
 	defer ticker.Stop()
 	for {
 		select {
@@ -110,6 +116,7 @@ func (g *encoderGroup) runEncoder(ctx context.Context, idx int) error {
 			metric.Set(float64(len(inputCh)))
 		case future := <-inputCh:
 			for _, event := range future.events {
+                                log.Info("Catch data from TiDB", zap.String("topic", future.Topic))
 				err := encoder.AppendRowChangedEvent(ctx, future.Topic, event.Event, event.Callback)
 				if err != nil {
 					return errors.Trace(err)

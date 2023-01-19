@@ -32,6 +32,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+
+	"runtime/debug"
 )
 
 const (
@@ -104,6 +106,8 @@ func newWorker(
 // run starts a loop that keeps collecting, sorting and sending messages
 // until it encounters an error or is interrupted.
 func (w *worker) run(ctx context.Context) (retErr error) {
+	debug.PrintStack()
+        log.Info("DEBUG Info:",zap.String("stack",  string(debug.Stack()) ) )
 	defer func() {
 		w.ticker.Stop()
 		log.Info("MQ sink worker exited", zap.Error(retErr),

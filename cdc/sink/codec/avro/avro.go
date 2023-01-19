@@ -41,8 +41,8 @@ import (
 // BatchEncoder converts the events to binary Avro data
 type BatchEncoder struct {
 	namespace          string
-	keySchemaManager   *schemaManager
-	valueSchemaManager *schemaManager
+	keySchemaManager   schemaManager
+	valueSchemaManager schemaManager
 	result             []*common.Message
 
 	enableTiDBExtension        bool
@@ -52,7 +52,7 @@ type BatchEncoder struct {
 
 type avroEncodeResult struct {
 	data       []byte
-	registryID int
+	registryID string
 }
 
 // AppendRowChangedEvent appends a row change event to the encoder
@@ -146,7 +146,7 @@ func (a *BatchEncoder) avroEncode(
 		cols                []*model.Column
 		colInfos            []rowcodec.ColInfo
 		enableTiDBExtension bool
-		schemaManager       *schemaManager
+		schemaManager       schemaManager
 		operation           string
 	)
 	if isKey {
@@ -769,7 +769,7 @@ const magicByte = uint8(0)
 // -and-ksqldb-viewing-kafka-messages-bytes-as-hex/
 func (r *avroEncodeResult) toEnvelope() ([]byte, error) {
 	buf := new(bytes.Buffer)
-	data := []interface{}{magicByte, int32(r.registryID), r.data}
+	data := []interface{}{magicByte, []byte(r.registryID), r.data}
 	for _, v := range data {
 		err := binary.Write(buf, binary.BigEndian, v)
 		if err != nil {
@@ -782,8 +782,8 @@ func (r *avroEncodeResult) toEnvelope() ([]byte, error) {
 type batchEncoderBuilder struct {
 	namespace          string
 	config             *common.Config
-	keySchemaManager   *schemaManager
-	valueSchemaManager *schemaManager
+	keySchemaManager   schemaManager
+	valueSchemaManager schemaManager
 }
 
 const (

@@ -19,6 +19,7 @@ import (
 	"io"
 	"sync"
 	"time"
+	"runtime/debug"
 
 	"github.com/google/uuid"
 	"github.com/pingcap/errors"
@@ -314,6 +315,9 @@ func (c *captureImpl) Run(ctx context.Context) error {
 }
 
 func (c *captureImpl) run(stdCtx context.Context) error {
+	debug.PrintStack()
+        log.Info("DEBUG Info 07:",zap.String("stack",  string(debug.Stack()) ) )
+
 	err := c.register(stdCtx)
 	if err != nil {
 		return errors.Trace(err)

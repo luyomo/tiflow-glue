@@ -33,6 +33,8 @@ import (
 	cerror "github.com/pingcap/tiflow/pkg/errors"
 	"github.com/pingcap/tiflow/pkg/sink"
 	"go.uber.org/zap"
+
+	"runtime/debug"
 )
 
 // Assert EventSink[E event.TableEvent] implementation
@@ -62,6 +64,9 @@ func newSink(ctx context.Context,
 	encoderConcurrency int,
 	errCh chan error,
 ) (*dmlSink, error) {
+	debug.PrintStack()
+        log.Info("DEBUG Info 06:",zap.String("stack",  string(debug.Stack()) ) )
+
 	changefeedID := contextutil.ChangefeedIDFromCtx(ctx)
 
 	encoderBuilder, err := builder.NewEventBatchEncoderBuilder(ctx, encoderConfig)
