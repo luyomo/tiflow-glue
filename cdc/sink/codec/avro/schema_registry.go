@@ -39,10 +39,12 @@ import (
         "github.com/aws/aws-sdk-go-v2/service/glue"
         "github.com/aws/aws-sdk-go-v2/service/glue/types"
         "github.com/aws/aws-sdk-go-v2/aws"
+
+	"github.com/satori/go.uuid"
 )
 
 type schemaManager interface {
-	GetCachedOrRegister(context.Context, string, uint64, SchemaGenerator,) (*goavro.Codec, string, error)
+	GetCachedOrRegister(context.Context, string, uint64, SchemaGenerator,) (*goavro.Codec, []byte, error)
 	ClearRegistry(context.Context, string) error
 }
 
@@ -133,7 +135,7 @@ func (m *ConfluentSchemaManager) Register(
 	ctx context.Context,
 	topicName string,
 	codec *goavro.Codec,
-) (string, error) {
+) ([]byte, error) {
 	// The Schema Registry expects the JSON to be without newline characters
 
         debug.PrintStack()
@@ -144,7 +146,7 @@ func (m *ConfluentSchemaManager) Register(
 	err := json.Compact(buffer, []byte(codec.Schema()))
 	if err != nil {
 		log.Error("Could not compact schema", zap.Error(err))
-		return "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+		return nil, cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
 	}
 	reqBody := registerRequest{
 		Schema: buffer.String(),
@@ -152,7 +154,7 @@ func (m *ConfluentSchemaManager) Register(
 	payload, err := json.Marshal(&reqBody)
 	if err != nil {
 		log.Error("Could not marshal request to the Registry", zap.Error(err))
-		return "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+		return nil, cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
 	}
 	uri := m.registryURL + "/subjects/" + url.QueryEscape(
 		m.topicNameToSchemaSubject(topicName),
@@ -162,7 +164,7 @@ func (m *ConfluentSchemaManager) Register(
 	req, err := http.NewRequestWithContext(ctx, "POST", uri, bytes.NewReader(payload))
 	if err != nil {
 		log.Error("Failed to NewRequestWithContext", zap.Error(err))
-		return "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+		return nil, cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
 	}
 	req.Header.Add(
 		"Accept",
@@ -172,14 +174,14 @@ func (m *ConfluentSchemaManager) Register(
 	req.Header.Add("Content-Type", "application/vnd.schemaregistry.v1+json")
 	resp, err := httpRetry(ctx, m.credential, req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error("Failed to read response from Registry", zap.Error(err))
-		return "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+		return nil, cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
 	}
 
 	if resp.StatusCode != 200 {
@@ -193,7 +195,7 @@ func (m *ConfluentSchemaManager) Register(
 			zap.ByteString("requestBody", payload),
 			zap.ByteString("responseBody", body),
 		)
-		return "", cerror.ErrAvroSchemaAPIError.GenWithStackByArgs()
+		return nil, cerror.ErrAvroSchemaAPIError.GenWithStackByArgs()
 	}
 
 	var jsonResp registerResponse
@@ -201,11 +203,11 @@ func (m *ConfluentSchemaManager) Register(
 
 	if err != nil {
 		log.Error("Failed to parse result from Registry", zap.Error(err))
-		return "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+		return nil, cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
 	}
 
 	if jsonResp.ID == 0 {
-		return "0", cerror.ErrAvroSchemaAPIError.GenWithStack(
+		return []byte("0"), cerror.ErrAvroSchemaAPIError.GenWithStack(
 			"Illegal schema ID returned from Registry %d",
 			jsonResp.ID,
 		)
@@ -216,7 +218,7 @@ func (m *ConfluentSchemaManager) Register(
 		zap.String("uri", uri),
 		zap.ByteString("body", body))
 
-	return string(jsonResp.ID), nil
+	return []byte(string(jsonResp.ID)), nil
 }
 
 // SchemaGenerator represents a function that returns an Avro schema in JSON.
@@ -232,7 +234,7 @@ func (m *ConfluentSchemaManager) GetCachedOrRegister(
 	topicName string,
 	tiSchemaID uint64,
 	schemaGen SchemaGenerator,
-) (*goavro.Codec, string, error) {
+) (*goavro.Codec, []byte, error) {
 	log.Info("---------- ---------- GetCachedOrRegister: ", zap.String("topic name", topicName), zap.Uint64("tiSchemaID", tiSchemaID))
         log.Info(fmt.Sprintf("The schema generator is <%#v>", schemaGen))
 	key := m.topicNameToSchemaSubject(topicName)
@@ -244,7 +246,7 @@ func (m *ConfluentSchemaManager) GetCachedOrRegister(
 			zap.Uint64("tiSchemaID", tiSchemaID),
 			zap.String("registryID", entry.registryID))
 		m.cacheRWLock.RUnlock()
-		return entry.codec, entry.registryID, nil
+		return entry.codec, []byte(string(entry.registryID)), nil
 	}
 	m.cacheRWLock.RUnlock()
 
@@ -254,13 +256,13 @@ func (m *ConfluentSchemaManager) GetCachedOrRegister(
 
 	schema, err := schemaGen()
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 
 	codec, err := goavro.NewCodec(schema)
 	if err != nil {
 		log.Error("GetCachedOrRegister: Could not make goavro codec", zap.Error(err))
-		return nil, "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+		return nil, nil, cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
 	}
 
         log.Info(fmt.Sprintf("The code to be registered: %#v", codec))
@@ -268,7 +270,7 @@ func (m *ConfluentSchemaManager) GetCachedOrRegister(
 	id, err := m.Register(ctx, key, codec)
 	if err != nil {
 		log.Error("GetCachedOrRegister: Could not register schema", zap.Error(err))
-		return nil, "", errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	cacheEntry := new(schemaCacheEntry)
@@ -286,7 +288,7 @@ func (m *ConfluentSchemaManager) GetCachedOrRegister(
 		zap.String("registryID", cacheEntry.registryID),
 		zap.String("schema", cacheEntry.codec.Schema()))
 
-	return codec, string(id), nil
+	return codec, []byte(string(id)), nil
 }
 
 // ClearRegistry clears the Registry subject for the given table. Should be idempotent.
@@ -415,7 +417,7 @@ func (m *GlueSchemaManager) Register(
 	ctx context.Context,
 	topicName string,
 	codec *goavro.Codec,
-) (string, error) {
+) ([]byte, error) {
 	// The Schema Registry expects the JSON to be without newline characters
 
         debug.PrintStack()
@@ -425,32 +427,38 @@ func (m *GlueSchemaManager) Register(
     log.Info("Registering the schema into glue")
     cfg, err := config.LoadDefaultConfig(context.TODO())
     if err != nil {
-        return "", err
+        return nil, err
     }
     client := glue.NewFromConfig(cfg)
 
     listSchemas, err := client.ListSchemas(context.TODO(), &glue.ListSchemasInput{RegistryId: &types.RegistryId{RegistryArn: aws.String("arn:aws:glue:us-east-1:729581434105:registry/jaytest")}})
     if err != nil {
-        return "", err
+        return nil, err
     }
     for _, schema := range listSchemas.Schemas {
         if *schema.SchemaName == topicName {
             log.Info("Create new schema version: ", zap.String("schema arn", *schema.SchemaArn), zap.String("registry name", *schema.RegistryName), zap.String("schema name", topicName))
-            _, err := client.RegisterSchemaVersion(context.TODO(), &glue.RegisterSchemaVersionInput{SchemaDefinition: aws.String(codec.Schema()), SchemaId: &types.SchemaId{SchemaArn: schema.SchemaArn}}) 
+            registerSchemaVersion, err := client.RegisterSchemaVersion(context.TODO(), &glue.RegisterSchemaVersionInput{SchemaDefinition: aws.String(codec.Schema()), SchemaId: &types.SchemaId{SchemaArn: schema.SchemaArn}})
             if err != nil {
-                return "", err
+                return nil, err
             }
 	    // log.Info("Registered schema successfully",
 	    // 	zap.Int("id", jsonResp.ID),
 	    // 	zap.String("uri", uri),
 	    // 	zap.ByteString("body", body))
-            return "", nil
+	    uuidSchemaVersionId, err := uuid.FromString(*registerSchemaVersion.SchemaVersionId)
+            if err != nil {
+                return nil, err
+            }
+	    log.Info("Length of uuid ", zap.Int("uuid", len(uuidSchemaVersionId.Bytes())))
+            // return *registerSchemaVersion.SchemaVersionId, nil
+            return uuidSchemaVersionId.Bytes(), nil
         }
     }
 
     createSchema, err := client.CreateSchema( context.TODO(), &glue.CreateSchemaInput{DataFormat: types.DataFormat("AVRO"), SchemaName: aws.String(topicName), RegistryId: &types.RegistryId{RegistryArn: aws.String("arn:aws:glue:us-east-1:729581434105:registry/jaytest")}, SchemaDefinition: aws.String(codec.Schema()), Compatibility: types.CompatibilityBackward } )
     if err != nil {
-        return "", err
+        return nil, err
     }
     log.Info(fmt.Sprintf("Data: %#v ", createSchema))
     // return nil
@@ -460,7 +468,14 @@ func (m *GlueSchemaManager) Register(
 //        }
 
 
-	return "", nil
+	    uuidSchemaVersionId, err := uuid.FromString(*createSchema.SchemaVersionId)
+            if err != nil {
+                return nil, err
+            }
+	    log.Info("Length of uuid ", zap.Int("uuid", len(uuidSchemaVersionId.Bytes())))
+            // return *registerSchemaVersion.SchemaVersionId, nil
+            return uuidSchemaVersionId.Bytes(), nil
+//	return *createSchema.SchemaVersionId, nil
 }
 // ClearRegistry clears the Registry subject for the given table. Should be idempotent.
 // Exported for testing.
@@ -516,7 +531,7 @@ func (m *GlueSchemaManager) GetCachedOrRegister(
 	topicName string,
 	tiSchemaID uint64,
 	schemaGen SchemaGenerator,
-) (*goavro.Codec, string, error) {
+) (*goavro.Codec, []byte, error) {
 	log.Info("---------- ---------- GetCachedOrRegister: ", zap.String("topic name", topicName), zap.Uint64("tiSchemaID", tiSchemaID))
         log.Info(fmt.Sprintf("The schema generator is <%#v>", schemaGen))
 	key := m.topicNameToSchemaSubject(topicName)
@@ -528,7 +543,7 @@ func (m *GlueSchemaManager) GetCachedOrRegister(
 			zap.Uint64("tiSchemaID", tiSchemaID),
 			zap.String("registryID", entry.registryID))
 		m.cacheRWLock.RUnlock()
-		return entry.codec, entry.registryID, nil
+		return entry.codec, []byte(string(entry.registryID)), nil
 	}
 	m.cacheRWLock.RUnlock()
 
@@ -538,13 +553,13 @@ func (m *GlueSchemaManager) GetCachedOrRegister(
 
 	schema, err := schemaGen()
 	if err != nil {
-		return nil, "0", err
+		return nil, []byte(string("0")), err
 	}
 
 	codec, err := goavro.NewCodec(schema)
 	if err != nil {
 		log.Error("GetCachedOrRegister: Could not make goavro codec", zap.Error(err))
-		return nil, "0", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+		return nil, []byte(string("0")), cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
 	}
 
         log.Info(fmt.Sprintf("The code to be registered: %#v", codec))
@@ -552,7 +567,7 @@ func (m *GlueSchemaManager) GetCachedOrRegister(
 	id, err := m.Register(ctx, key, codec)
 	if err != nil {
 		log.Error("GetCachedOrRegister: Could not register schema", zap.Error(err))
-		return nil, "0", errors.Trace(err)
+		return nil, []byte(string("0")), errors.Trace(err)
 	}
 
 	cacheEntry := new(schemaCacheEntry)
@@ -577,3 +592,4 @@ func (m *GlueSchemaManager) GetCachedOrRegister(
 func (m *GlueSchemaManager) topicNameToSchemaSubject(topicName string) string {
 	return topicName + m.subjectSuffix
 }
+

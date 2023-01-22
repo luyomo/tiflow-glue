@@ -52,7 +52,7 @@ type BatchEncoder struct {
 
 type avroEncodeResult struct {
 	data       []byte
-	registryID string
+	registryID []byte
 }
 
 // AppendRowChangedEvent appends a row change event to the encoder
@@ -764,17 +764,25 @@ func columnToAvroData(
 
 const magicByte = uint8(0)
 
+// The data for glue
+const version = uint8(3)            // 3 is fixed for the glue message
+//const compressionByte = uint8(5)    // 5 compression: zip
+const compressionByte = uint8(0)    // 0  no compression
+
 // confluent avro wire format, confluent avro is not same as apache avro
 // https://rmoff.net/2020/07/03/why-json-isnt-the-same-as-json-schema-in-kafka-connect-converters \
 // -and-ksqldb-viewing-kafka-messages-bytes-as-hex/
 func (r *avroEncodeResult) toEnvelope() ([]byte, error) {
 	buf := new(bytes.Buffer)
-	data := []interface{}{magicByte, []byte(r.registryID), r.data}
+//	data := []interface{}{magicByte, []byte(r.registryID), r.data}    // confluent schema registry
+        // uuid := make([]byte, 16)
+	//data := []interface{}{version, compressionByte, uint8(3), uint8(4), uint8(5), uint8(6), uint8(7), uint8(8), uint8(9), uint8(10), uint8(11), uint8(12), uint8(13), uint8(14), uint8(15), uint8(16), uint8(17), uint8(18),  r.data}    // Glue schema registry
+	data := []interface{}{version, compressionByte, r.registryID,  r.data}    // Glue schema registry
 	for _, v := range data {
 		err := binary.Write(buf, binary.BigEndian, v)
 		if err != nil {
 			return nil, cerror.WrapError(cerror.ErrAvroToEnvelopeError, err)
-		}
+		} 
 	}
 	return buf.Bytes(), nil
 }
