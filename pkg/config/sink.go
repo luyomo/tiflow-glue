@@ -105,7 +105,7 @@ type SinkConfig struct {
 	CSVConfig                *CSVConfig        `toml:"csv" json:"csv"`
 	ColumnSelectors          []*ColumnSelector `toml:"column-selectors" json:"column-selectors"`
 	SchemaRegistry           string            `toml:"schema-registry" json:"schema-registry"`
-	GlueSchemaRegistry       string            `toml:"glue-schema-registry" json:"glue-schema-registry"`
+	SchemaRegistryProvider   string            `toml:"schema-registry-provider" json:"schema-registry-provider"`
 	EncoderConcurrency       int               `toml:"encoder-concurrency" json:"encoder-concurrency"`
 	Terminator               string            `toml:"terminator" json:"terminator"`
 	DateSeparator            string            `toml:"date-separator" json:"date-separator"`

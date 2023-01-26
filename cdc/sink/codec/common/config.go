@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tiflow/pkg/config"
+	"golang.org/x/exp/slices"
 	cerror "github.com/pingcap/tiflow/pkg/errors"
 )
 
@@ -40,9 +41,7 @@ type Config struct {
 	AvroSchemaRegistry             string
 	AvroDecimalHandlingMode        string
 	AvroBigintUnsignedHandlingMode string
-
-	// glue avro
-	AvroGlueSchemaRegistry         string
+	AvroSchemaRegistryProvider     string
 
 	// for sinking to cloud storage
 	Delimiter       string
@@ -62,7 +61,7 @@ func NewConfig(protocol config.Protocol) *Config {
 
 		EnableTiDBExtension:            false,
 		AvroSchemaRegistry:             "",
-                AvroGlueSchemaRegistry:         "",
+                AvroSchemaRegistryProvider:     "confluent",
 		AvroDecimalHandlingMode:        "precise",
 		AvroBigintUnsignedHandlingMode: "long",
 	}
@@ -75,7 +74,7 @@ const (
 	codecOPTAvroDecimalHandlingMode        = "avro-decimal-handling-mode"
 	codecOPTAvroBigintUnsignedHandlingMode = "avro-bigint-unsigned-handling-mode"
 	codecOPTAvroSchemaRegistry             = "schema-registry"
-	codecOPTAvroGlueSchemaRegistry         = "glue-schema-registry"
+	codecOPTAvroSchemaRegistryProvider     = "schema-registry-provider"
 )
 
 const (
@@ -128,8 +127,8 @@ func (c *Config) Apply(sinkURI *url.URL, config *config.ReplicaConfig) error {
 		c.AvroSchemaRegistry = config.Sink.SchemaRegistry
 	}
 
-	if config.Sink != nil && config.Sink.GlueSchemaRegistry != "" {
-		c.AvroGlueSchemaRegistry = config.Sink.GlueSchemaRegistry
+	if config.Sink != nil && config.Sink.SchemaRegistryProvider != "" {
+		c.AvroSchemaRegistryProvider = config.Sink.SchemaRegistryProvider
 	}
 
 	if config.Sink != nil {
@@ -161,12 +160,28 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Protocol == config.ProtocolAvro {
-		if c.AvroSchemaRegistry == "" && c.AvroGlueSchemaRegistry == "" {
+		if c.AvroSchemaRegistry == "" {
 			return cerror.ErrCodecInvalidConfig.GenWithStack(
-				`Avro protocol requires parameter "%s" or "%s"`,
+				`Avro protocol requires parameter "%s"`,
 				codecOPTAvroSchemaRegistry,
-                                codecOPTAvroGlueSchemaRegistry,
 			)
+		}
+
+		if !slices.Contains([]string{"confluent", "glue"}, c.AvroSchemaRegistryProvider) {
+			return cerror.ErrCodecInvalidConfig.GenWithStack(
+				`Schema registry provider(%s) require ["confluent", "glue"] instead of "%s"`,
+				codecOPTAvroSchemaRegistryProvider,
+				c.AvroSchemaRegistryProvider,
+			)
+		}
+
+		if c.AvroSchemaRegistryProvider == "confluent" {
+			if _, err := url.ParseRequestURI(c.AvroSchemaRegistry); err != nil {
+				return cerror.ErrCodecInvalidConfig.GenWithStack(
+					`Confluent schema registry uri(%s) require format http(s)://confluent-schema-registry:port`,
+					codecOPTAvroSchemaRegistry,
+				)
+			}
 		}
 
 		if c.AvroDecimalHandlingMode != DecimalHandlingModePrecise &&

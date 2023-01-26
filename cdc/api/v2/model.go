@@ -202,6 +202,7 @@ func (c *ReplicaConfig) ToInternalReplicaConfig() *config.ReplicaConfig {
 			TxnAtomicity:             config.AtomicityLevel(c.Sink.TxnAtomicity),
 			ColumnSelectors:          columnSelectors,
 			SchemaRegistry:           c.Sink.SchemaRegistry,
+			SchemaRegistryProvider:   c.Sink.SchemaRegistryProvider,
 			EncoderConcurrency:       c.Sink.EncoderConcurrency,
 			Terminator:               c.Sink.Terminator,
 			DateSeparator:            c.Sink.DateSeparator,
@@ -302,6 +303,7 @@ func ToAPIReplicaConfig(c *config.ReplicaConfig) *ReplicaConfig {
 		res.Sink = &SinkConfig{
 			Protocol:                 cloned.Sink.Protocol,
 			SchemaRegistry:           cloned.Sink.SchemaRegistry,
+			SchemaRegistryProvider:   cloned.Sink.SchemaRegistryProvider,
 			DispatchRules:            dispatchRules,
 			CSVConfig:                csvConfig,
 			ColumnSelectors:          columnSelectors,
@@ -447,6 +449,7 @@ type Table struct {
 type SinkConfig struct {
 	Protocol                 string            `json:"protocol"`
 	SchemaRegistry           string            `json:"schema_registry"`
+	SchemaRegistryProvider   string            `json:"schema_registry_provider"`
 	CSVConfig                *CSVConfig        `json:"csv"`
 	DispatchRules            []*DispatchRule   `json:"dispatchers,omitempty"`
 	ColumnSelectors          []*ColumnSelector `json:"column_selectors"`

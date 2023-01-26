@@ -52,7 +52,7 @@ type BatchEncoder struct {
 
 type avroEncodeResult struct {
 	data       []byte
-	registryID []byte
+	header     []byte
 }
 
 // AppendRowChangedEvent appends a row change event to the encoder
@@ -191,7 +191,7 @@ func (a *BatchEncoder) avroEncode(
 		return schema, nil
 	}
 
-	avroCodec, registryID, err := schemaManager.GetCachedOrRegister(
+	avroCodec, header, err := schemaManager.GetCachedOrRegister(
 		ctx,
 		topic,
 		e.TableInfo.Version,
@@ -223,7 +223,7 @@ func (a *BatchEncoder) avroEncode(
 
 	return &avroEncodeResult{
 		data:       bin,
-		registryID: registryID,
+		header:     header,
 	}, nil
 }
 
@@ -765,9 +765,9 @@ func columnToAvroData(
 const magicByte = uint8(0)
 
 // The data for glue
-const version = uint8(3)            // 3 is fixed for the glue message
+//const version = uint8(3)            // 3 is fixed for the glue message
 //const compressionByte = uint8(5)    // 5 compression: zip
-const compressionByte = uint8(0)    // 0  no compression
+//const compressionByte = uint8(0)    // 0  no compression
 
 // confluent avro wire format, confluent avro is not same as apache avro
 // https://rmoff.net/2020/07/03/why-json-isnt-the-same-as-json-schema-in-kafka-connect-converters \
@@ -777,7 +777,8 @@ func (r *avroEncodeResult) toEnvelope() ([]byte, error) {
 //	data := []interface{}{magicByte, []byte(r.registryID), r.data}    // confluent schema registry
         // uuid := make([]byte, 16)
 	//data := []interface{}{version, compressionByte, uint8(3), uint8(4), uint8(5), uint8(6), uint8(7), uint8(8), uint8(9), uint8(10), uint8(11), uint8(12), uint8(13), uint8(14), uint8(15), uint8(16), uint8(17), uint8(18),  r.data}    // Glue schema registry
-	data := []interface{}{version, compressionByte, r.registryID,  r.data}    // Glue schema registry
+	//data := []interface{}{VERSION, COMPRESSION_BYTE, r.registryID,  r.data}    // Glue schema registry
+	data := []interface{}{r.header,  r.data}    // Glue schema registry
 	for _, v := range data {
 		err := binary.Write(buf, binary.BigEndian, v)
 		if err != nil {
@@ -805,6 +806,7 @@ func NewBatchEncoderBuilder(ctx context.Context, config *common.Config) (codec.E
 		ctx,
 		nil,
 		config.AvroSchemaRegistry,
+		config.AvroSchemaRegistryProvider,
 		keySchemaSuffix,
 	)
 	if err != nil {
@@ -815,6 +817,7 @@ func NewBatchEncoderBuilder(ctx context.Context, config *common.Config) (codec.E
 		ctx,
 		nil,
 		config.AvroSchemaRegistry,
+		config.AvroSchemaRegistryProvider,
 		valueSchemaSuffix,
 	)
 	if err != nil {

@@ -38,13 +38,14 @@ import (
 
 // changefeedCommonOptions defines common changefeed flags.
 type changefeedCommonOptions struct {
-	noConfirm      bool
-	targetTs       uint64
-	sinkURI        string
-	schemaRegistry string
-	configFile     string
-	sortEngine     string
-	sortDir        string
+	noConfirm              bool
+	targetTs               uint64
+	sinkURI                string
+	schemaRegistry         string
+	schemaRegistryProvider string
+	configFile             string
+	sortEngine             string
+	sortDir                string
 
 	upstreamPDAddrs  string
 	upstreamCaPath   string
@@ -68,6 +69,8 @@ func (o *changefeedCommonOptions) addFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&o.sortDir, "sort-dir", "", "directory used for data sort")
 	cmd.PersistentFlags().StringVar(&o.schemaRegistry, "schema-registry", "",
 		"Avro Schema Registry URI")
+	cmd.PersistentFlags().StringVar(&o.schemaRegistryProvider, "schema-registry-provider", "",
+		"Avro Schema Registry Provider")
 	cmd.PersistentFlags().StringVar(&o.upstreamPDAddrs, "upstream-pd", "",
 		"upstream PD address, use ',' to separate multiple PDs")
 	cmd.PersistentFlags().StringVar(&o.upstreamCaPath, "upstream-ca", "",
@@ -188,6 +191,10 @@ func (o *createChangefeedOptions) completeReplicaCfg(
 
 	if o.commonChangefeedOptions.schemaRegistry != "" {
 		cfg.Sink.SchemaRegistry = o.commonChangefeedOptions.schemaRegistry
+	}
+
+	if o.commonChangefeedOptions.schemaRegistryProvider != "" {
+		cfg.Sink.SchemaRegistryProvider = o.commonChangefeedOptions.schemaRegistryProvider
 	}
 
 	switch o.commonChangefeedOptions.sortEngine {
