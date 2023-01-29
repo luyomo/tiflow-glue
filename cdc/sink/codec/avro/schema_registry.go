@@ -24,6 +24,8 @@ import (
 type schemaManager interface {
 	GetCachedOrRegister(context.Context, string, uint64, SchemaGenerator) (*goavro.Codec, []byte, error)
 	ClearRegistry(context.Context, string) error
+	Lookup( ctx context.Context, topicName string, tiSchemaID uint64) (*goavro.Codec, string, error)
+	Register( ctx context.Context, topicName string, codec *goavro.Codec) ([]byte, error)
 }
 
 // NewAvroSchemaManager creates a new schemaManager and test connectivity to the schema registry

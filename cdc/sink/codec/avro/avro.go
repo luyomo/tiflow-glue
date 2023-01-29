@@ -762,7 +762,7 @@ func columnToAvroData(
 	}
 }
 
-const magicByte = uint8(0)
+//const magicByte = uint8(0)
 
 // The data for glue
 //const version = uint8(3)            // 3 is fixed for the glue message

@@ -16,6 +16,7 @@ package avro
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -24,7 +25,7 @@ import (
 	"sync"
 	"time"
         "fmt"
-        "runtime/debug"
+//        "runtime/debug"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/linkedin/goavro/v2"
@@ -120,10 +121,10 @@ func (m *ConfluentSchemaManager) Register(
 ) ([]byte, error) {
 	// The Schema Registry expects the JSON to be without newline characters
 
-        debug.PrintStack()
-        log.Info("DEBUG Info 05:",zap.String("stack",  string(debug.Stack()) ) )
+	// debug.PrintStack()
+        // log.Info("DEBUG Info 05:",zap.String("stack",  string(debug.Stack()) ) )
 
-	log.Info("---------- ---------- Register: ", zap.String("topic name", topicName))
+	// log.Info("---------- ---------- Register: ", zap.String("topic name", topicName))
 	buffer := new(bytes.Buffer)
 	err := json.Compact(buffer, []byte(codec.Schema()))
 	if err != nil {
@@ -200,7 +201,127 @@ func (m *ConfluentSchemaManager) Register(
 		zap.String("uri", uri),
 		zap.ByteString("body", body))
 
-	return []byte(string(jsonResp.ID)), nil
+	header, err := m.toHeader(jsonResp.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return header, nil
+}
+
+
+const magicByte = uint8(0)
+
+func (m *ConfluentSchemaManager) toHeader(registryID int) ([]byte, error) {
+        buf := new(bytes.Buffer)
+        data := []interface{}{magicByte, int32(registryID)}
+        for _, v := range data {
+                err := binary.Write(buf, binary.BigEndian, v)
+                if err != nil {
+                        return nil, cerror.WrapError(cerror.ErrAvroToEnvelopeError, err)
+                }
+        }
+        return buf.Bytes(), nil
+}
+
+// Lookup the latest schema and the Registry designated ID for that schema.
+// TiSchemaId is only used to trigger fetching from the Registry server.
+// Calling this method with a tiSchemaID other than that used last time will invariably trigger a
+// RESTful request to the Registry.
+// Returns (codec, registry schema ID, error)
+// NOT USED for now, reserved for future use.
+func (m *ConfluentSchemaManager) Lookup(
+        ctx context.Context,
+        topicName string,
+        tiSchemaID uint64,
+) (*goavro.Codec, string, error) {
+        key := m.topicNameToSchemaSubject(topicName)
+        m.cacheRWLock.RLock()
+        if entry, exists := m.cache[key]; exists && entry.tiSchemaID == tiSchemaID {
+                log.Info("Avro schema lookup cache hit",
+                        zap.String("key", key),
+                        zap.Uint64("tiSchemaID", tiSchemaID),
+                        zap.String("registryID", entry.registryID))
+                m.cacheRWLock.RUnlock()
+                return entry.codec, entry.registryID, nil
+        }
+        m.cacheRWLock.RUnlock()
+
+        log.Info("Avro schema lookup cache miss",
+                zap.String("key", key),
+                zap.Uint64("tiSchemaID", tiSchemaID))
+
+        uri := m.registryURL + "/subjects/" + url.QueryEscape(key) + "/versions/latest"
+        log.Debug("Querying for latest schema", zap.String("uri", uri))
+
+        req, err := http.NewRequestWithContext(ctx, "GET", uri, nil)
+        if err != nil {
+                log.Error("Error constructing request for Registry lookup", zap.Error(err))
+                return nil, "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+        }
+        req.Header.Add(
+                "Accept",
+                "application/vnd.schemaregistry.v1+json, application/vnd.schemaregistry+json, "+
+                        "application/json",
+        )
+
+        resp, err := httpRetry(ctx, m.credential, req)
+        if err != nil {
+                return nil, "", err
+        }
+        defer resp.Body.Close()
+
+        body, err := io.ReadAll(resp.Body)
+        if err != nil {
+                log.Error("Failed to parse result from Registry", zap.Error(err))
+                return nil, "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+        }
+
+        if resp.StatusCode != 200 && resp.StatusCode != 404 {
+                log.Error("Failed to query schema from the Registry, HTTP error",
+                        zap.Int("status", resp.StatusCode),
+                        zap.String("uri", uri),
+                        zap.ByteString("responseBody", body))
+                return nil, "", cerror.ErrAvroSchemaAPIError.GenWithStack(
+                        "Failed to query schema from the Registry, HTTP error",
+                )
+        }
+
+        if resp.StatusCode == 404 {
+                log.Warn("Specified schema not found in Registry",
+                        zap.String("key", key),
+                        zap.Uint64("tiSchemaID", tiSchemaID))
+                return nil, "", cerror.ErrAvroSchemaAPIError.GenWithStackByArgs(
+                        "Schema not found in Registry",
+                )
+        }
+
+        var jsonResp lookupResponse
+        err = json.Unmarshal(body, &jsonResp)
+        if err != nil {
+                log.Error("Failed to parse result from Registry", zap.Error(err))
+                return nil, "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+        }
+
+        cacheEntry := new(schemaCacheEntry)
+        cacheEntry.codec, err = goavro.NewCodec(jsonResp.Schema)
+        if err != nil {
+                log.Error("Creating Avro codec failed", zap.Error(err))
+                return nil, "", cerror.WrapError(cerror.ErrAvroSchemaAPIError, err)
+        }
+        cacheEntry.registryID = fmt.Sprintf("%d", jsonResp.RegistryID)
+        cacheEntry.tiSchemaID = tiSchemaID
+
+        m.cacheRWLock.Lock()
+        m.cache[key] = cacheEntry
+        m.cacheRWLock.Unlock()
+
+        log.Info("Avro schema lookup successful with cache miss",
+                zap.Uint64("tiSchemaID", cacheEntry.tiSchemaID),
+                zap.String("registryID", cacheEntry.registryID),
+                zap.String("schema", cacheEntry.codec.Schema()))
+
+        return cacheEntry.codec, cacheEntry.registryID, nil
 }
 
 // GetCachedOrRegister checks if the suitable Avro schema has been cached.

@@ -143,6 +143,10 @@ func (m *GlueSchemaManager) Register(
             return header, nil
 //	return *createSchema.SchemaVersionId, nil
 }
+
+func (m *GlueSchemaManager)Lookup( ctx context.Context, topicName string, tiSchemaID uint64) (*goavro.Codec, string, error){
+	return nil, "", nil
+}
 // ClearRegistry clears the Registry subject for the given table. Should be idempotent.
 // Exported for testing.
 // NOT USED for now, reserved for future use.

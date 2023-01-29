@@ -16,6 +16,7 @@ package avro
 import (
 	"bytes"
 	"context"
+//	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -167,6 +168,7 @@ func TestSchemaRegistry(t *testing.T) {
 		getTestingContext(),
 		nil,
 		"http://127.0.0.1:8081",
+		"confluent",
 		"-value",
 	)
 	require.NoError(t, err)
@@ -195,11 +197,11 @@ func TestSchemaRegistry(t *testing.T) {
 	_, err = manager.Register(getTestingContext(), topic, codec)
 	require.NoError(t, err)
 
-	var id int
+	var id string
 	for i := 0; i < 2; i++ {
 		_, id, err = manager.Lookup(getTestingContext(), topic, 1)
 		require.NoError(t, err)
-		require.Greater(t, id, 0)
+		require.Greater(t, id, "0")
 	}
 
 	codec, err = goavro.NewCodec(`{
@@ -235,10 +237,10 @@ func TestSchemaRegistryBad(t *testing.T) {
 	startHTTPInterceptForTestingRegistry()
 	defer stopHTTPInterceptForTestingRegistry()
 
-	_, err := NewAvroSchemaManager(getTestingContext(), nil, "http://127.0.0.1:808", "-value")
+	_, err := NewAvroSchemaManager(getTestingContext(), nil, "http://127.0.0.1:8080", "confluent", "-value")
 	require.NotNil(t, err)
 
-	_, err = NewAvroSchemaManager(getTestingContext(), nil, "https://127.0.0.1:8080", "-value")
+	_, err = NewAvroSchemaManager(getTestingContext(), nil, "https://127.0.0.1:8080", "confluent", "-value")
 	require.NotNil(t, err)
 }
 
@@ -250,6 +252,7 @@ func TestSchemaRegistryIdempotent(t *testing.T) {
 		getTestingContext(),
 		nil,
 		"http://127.0.0.1:8081",
+		"confluent",
 		"-value",
 	)
 	require.NoError(t, err)
@@ -282,12 +285,12 @@ func TestSchemaRegistryIdempotent(t *testing.T) {
      }`)
 	require.NoError(t, err)
 
-	id := 0
+	id := "0"
 	for i := 0; i < 20; i++ {
 		id1, err := manager.Register(getTestingContext(), topic, codec)
 		require.NoError(t, err)
-		require.True(t, id == 0 || id == id1)
-		id = id1
+		require.True(t, id == "0" || string(id) == string(id1))
+		id = string(id1)
 	}
 }
 
@@ -299,6 +302,7 @@ func TestGetCachedOrRegister(t *testing.T) {
 		getTestingContext(),
 		nil,
 		"http://127.0.0.1:8081",
+		"confluent",
 		"-value",
 	)
 	require.NoError(t, err)
@@ -332,7 +336,8 @@ func TestGetCachedOrRegister(t *testing.T) {
 
 	codec, id, err := manager.GetCachedOrRegister(getTestingContext(), topic, 1, schemaGen)
 	require.NoError(t, err)
-	require.Greater(t, id, 0)
+	res := bytes.Compare([]byte{'0'}, id)
+	require.Greater(t, res, 0)
 	require.NotNil(t, codec)
 	require.Equal(t, 1, called)
 
@@ -382,7 +387,9 @@ func TestGetCachedOrRegister(t *testing.T) {
 					schemaGen,
 				)
 				require.NoError(t, err)
-				require.Greater(t, id, 0)
+				//require.Greater(t, id, 0)
+	                        res := bytes.Compare([]byte{'0'}, id)
+	                        require.Greater(t, res, 0)
 				require.NotNil(t, codec)
 			}
 		}()
