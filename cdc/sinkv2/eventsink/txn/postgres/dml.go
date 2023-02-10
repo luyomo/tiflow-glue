@@ -15,6 +15,7 @@ package postgres
 
 import (
 	"strings"
+	"fmt"
 
 	"github.com/pingcap/tidb/parser/charset"
 	"github.com/pingcap/tiflow/cdc/model"
@@ -28,6 +29,9 @@ import (
 // sql: `UPDATE `test`.`t` SET {} = ?, {} = ? WHERE {} = ?, {} = {}`
 // `WHERE` conditions come from `preCols` and SET clause targets come from `cols`.
 func prepareUpdate(quoteTable string, preCols, cols []*model.Column, forceReplicate bool) (string, []interface{}) {
+	log.Info(fmt.Sprintf("quoteTable: %s", quoteTable))
+	log.Info(fmt.Sprintf("cols: %s", cols))
+	log.Info(fmt.Sprintf("forceReplicate: %t", forceReplicate))
 	log.Info("DEBUG prepareUpdate", zap.Stack("stacktrace"))
 	var builder strings.Builder
 	builder.WriteString("UPDATE " + quoteTable + " SET ")
@@ -81,6 +85,10 @@ func prepareReplace(
 	appendPlaceHolder bool,
 	translateToInsert bool,
 ) (string, []interface{}) {
+	log.Info(fmt.Sprintf("quoteTable: %s", quoteTable))
+	log.Info(fmt.Sprintf("cols: %s", cols))
+	log.Info(fmt.Sprintf("appendPlaceHolder: %t", appendPlaceHolder))
+	log.Info(fmt.Sprintf("translateToInsert: %s", translateToInsert))
 	var builder strings.Builder
 	columnNames := make([]string, 0, len(cols))
 	args := make([]interface{}, 0, len(cols))
@@ -169,6 +177,9 @@ func reduceReplace(replaces map[string][][]interface{}, batchSize int) ([]string
 // prepareDelete builds a parametric DELETE statement as following
 // sql: `DELETE FROM `test`.`t` WHERE x = ? AND y >= ?`
 func prepareDelete(quoteTable string, cols []*model.Column, forceReplicate bool) (string, []interface{}) {
+	log.Info(fmt.Sprintf("quoteTable: %s", quoteTable))
+	log.Info(fmt.Sprintf("cols: %s", cols))
+	log.Info(fmt.Sprintf("forceReplicate: %t", forceReplicate))
 	log.Info("DEBUG prepareReplace", zap.Stack("stacktrace"))
 	var builder strings.Builder
 	builder.WriteString("DELETE FROM " + quoteTable + " WHERE ")

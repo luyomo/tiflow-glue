@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-	"strings"
+	//"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
         "github.com/jackc/pgx/v5"
@@ -42,7 +42,8 @@ import (
 	cerror "github.com/pingcap/tiflow/pkg/errors"
 	"github.com/pingcap/tiflow/pkg/retry"
 	pmysql "github.com/pingcap/tiflow/pkg/sink/mysql"
-	"github.com/pingcap/tiflow/pkg/sqlmodel"
+	//"github.com/pingcap/tiflow/pkg/sqlmodel"
+	sqlmodel "github.com/pingcap/tiflow/cdc/sinkv2/eventsink/txn/postgres/dialect"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
@@ -414,6 +415,7 @@ func hasHandleKey(cols []*model.Column) bool {
 
 // prepareDMLs converts model.RowChangedEvent list to query string list and args list
 func (s *postgresBackend) prepareDMLs() *preparedDMLs {
+	log.Info("DEBUG: prepareDMLs")
 	// TODO: use a sync.Pool to reduce allocations.
 	startTs := make([]uint64, 0, s.rows)
 	sqls := make([]string, 0, s.rows)
@@ -436,18 +438,22 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 	// we only translate into insert when old value is enabled and safe mode is disabled
 	translateToInsert := s.cfg.EnableOldValue && !s.cfg.SafeMode
 
+	log.Info("DEBUG: prepareDMLs 001")
 	rowCount := 0
 	for _, event := range s.events {
+	        log.Info("DEBUG: prepareDMLs 002")
 		if len(event.Event.Rows) == 0 {
 			continue
 		}
 		rowCount += len(event.Event.Rows)
 
+	        log.Info("DEBUG: prepareDMLs 003")
 		firstRow := event.Event.Rows[0]
 		if len(startTs) == 0 || startTs[len(startTs)-1] != firstRow.StartTs {
 			startTs = append(startTs, firstRow.StartTs)
 		}
 
+	        log.Info("DEBUG: prepareDMLs 004")
 		// A row can be translated in to INSERT, when it was committed after
 		// the table it belongs to been replicating by TiCDC, which means it must not be
 		// replicated before, and there is no such row in downstream MySQL.
@@ -463,8 +469,10 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 			callbacks = append(callbacks, event.Callback)
 		}
 
+	        log.Info("DEBUG: prepareDMLs 005")
 		// Determine whether to use batch dml feature here.
 		if s.cfg.BatchDMLEnable {
+	                log.Info("DEBUG: prepareDMLs 006")
 			tableColumns := firstRow.Columns
 			if firstRow.IsDelete() {
 				tableColumns = firstRow.PreColumns
@@ -480,14 +488,17 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 			}
 		}
 
+                log.Info("DEBUG: prepareDMLs 007")
 		quoteTable := firstRow.Table.QuoteString()
 		for _, row := range event.Event.Rows {
+                        log.Info("DEBUG: prepareDMLs 008")
 			var query string
 			var args []interface{}
 			// If the old value is enabled, is not in safe mode and is an update event, then translate to UPDATE.
 			// NOTICE: Only update events with the old value feature enabled will have both columns and preColumns.
 			if translateToInsert && len(row.PreColumns) != 0 && len(row.Columns) != 0 {
 				flushCacheDMLs()
+				log.Info("prepareUpdate", zap.String("debug", "dml"))
 				query, args = prepareUpdate(quoteTable, row.PreColumns, row.Columns, s.cfg.ForceReplicate)
 				if query != "" {
 					sqls = append(sqls, query)
@@ -495,6 +506,7 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 				}
 				continue
 			}
+                        log.Info("DEBUG: prepareDMLs 009")
 
 			// Case for update event or delete event.
 			// For update event:
@@ -504,6 +516,7 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 			// It will be translated directly into a DELETE SQL.
 			if len(row.PreColumns) != 0 {
 				flushCacheDMLs()
+				log.Info("prepareDelete", zap.String("debug", "dml"))
 				query, args = prepareDelete(quoteTable, row.PreColumns, s.cfg.ForceReplicate)
 				if query != "" {
 					sqls = append(sqls, query)
@@ -519,8 +532,10 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 			// It will be translated directly into a
 			// INSERT(old value is enabled and not in safe mode)
 			// or REPLACE(old value is disabled or in safe mode) SQL.
+                        log.Info("DEBUG: prepareDMLs 010")
 			if len(row.Columns) != 0 {
 				if s.cfg.BatchReplaceEnabled {
+				        log.Info("prepareReplace 01", zap.String("debug", "dml"))
 					query, args = prepareReplace(quoteTable, row.Columns, false /* appendPlaceHolder */, translateToInsert)
 					if query != "" {
 						if _, ok := replaces[query]; !ok {
@@ -529,6 +544,7 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 						replaces[query] = append(replaces[query], args)
 					}
 				} else {
+				        log.Info("prepareReplace 02", zap.String("debug", "dml"))
 					query, args = prepareReplace(quoteTable, row.Columns, true /* appendPlaceHolder */, translateToInsert)
 					if query != "" {
 						sqls = append(sqls, query)
@@ -630,42 +646,48 @@ func (s *postgresBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prep
 			}
                         batch := &pgx.Batch{}
 
+			//ctx, cancelFunc := context.WithTimeout(pctx, writeTimeout)
+			//ctx, _ := context.WithTimeout(pctx, writeTimeout)
 			for i, query := range dmls.sqls {
 				args := dmls.values[i]
 				log.Info("mysql parameter", zap.String("param", fmt.Sprintf("%#v", args)))
 				log.Debug("exec row", zap.Int("workerID", s.workerID),
 					zap.String("sql", query), zap.Any("args", args))
-				ctx, cancelFunc := context.WithTimeout(pctx, writeTimeout)
 				// Insert data into mysql
-				if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-					err := logDMLTxnErr(
-						cerror.WrapError(cerror.ErrMySQLTxnError, err),
-						start, s.changefeed, query, dmls.rowCount, dmls.startTs)
-					if rbErr := tx.Rollback(); rbErr != nil {
-						if errors.Cause(rbErr) != context.Canceled {
-							log.Warn("failed to rollback txn", zap.Error(rbErr))
-						}
-					}
-					cancelFunc()
-					return 0, err
-				}
-				cancelFunc()
+				//if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+				//	err := logDMLTxnErr(
+				//		cerror.WrapError(cerror.ErrMySQLTxnError, err),
+				//		start, s.changefeed, query, dmls.rowCount, dmls.startTs)
+				//	if rbErr := tx.Rollback(); rbErr != nil {
+				//		if errors.Cause(rbErr) != context.Canceled {
+				//			log.Warn("failed to rollback txn", zap.Error(rbErr))
+				//		}
+				//	}
+				//	cancelFunc()
+				//	return 0, err
+				//}
+				//cancelFunc()
 
-				// postgres: insert data
-				pgquery := strings.Replace(strings.Replace(strings.Replace(query, "`", "", -1), "?", "$1", -1), "REPLACE", "INSERT", -1)
-				log.Info("pg query", zap.String("query", pgquery))
+				//// postgres: insert data
+				//pgquery := strings.Replace(strings.Replace(strings.Replace(query, "`", "", -1), "?", "$1", -1), "REPLACE", "INSERT", -1)
+				//log.Info("pg query", zap.String("query", pgquery))
 				log.Info("pg parameter", zap.String("param", fmt.Sprintf("%#v", args)))
-                                batch.Queue(pgquery, args...)
+                                //batch.Queue(pgquery, args...)
+                                batch.Queue(query, args...)
 			}
 
 			// postgres: batch data insert
                         br := pgtx.SendBatch(context.Background(), batch)
+                        //br := pgtx.SendBatch(ctx, batch)
                         var berr error
                         var result pgconn.CommandTag
                         for berr == nil {
                             result, berr = br.Exec()
                             log.Info("result", zap.String("postgres batch", result.String() )  )
-                 //           log.Info("result err", zap.String("postgres error",berr.Error() )  )
+			    if berr != nil {
+                 	           log.Info("result err", zap.String("postgres error",berr.Error() )  )
+		        	   //cancelFunc()
+			    }
                         }
 	                br.Close()
 
