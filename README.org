@@ -1,0 +1,68 @@
+* Troubleshooting
+Error: [CDC:ErrMySQLConnectionError]fail to open MySQL connection: Error 1298: Unknown or incorrect time zone: 'UTC'
+
+mysql_tzinfo_to_sql /usr/share/zoneinfo | sudo mysql -u root mysql
+
+* Flow
+
+https://cn.pingcap.com/blog/ticdc-source-code-reading-3
+
+campaign owner
+tiflow/cdc/capture/capture.go:348             -> capture.(*captureImpl).run
+tiflow/cdc/capture/capture.go:483             -> capture.(*captureImpl).campaignOwner
+tiflow/cdc/capture/capture.go:520             -> capture.(*captureImpl).runEtcdWorker
+tiflow/pkg/orchestrator/etcd_worker.go:290    -> orchestrator.(*EtcdWorker).Run
+tiflow/cdc/owner/owner.go:222                 -> owner.(*ownerImpl).Tick
+tiflow/cdc/owner/changefeed.go:200            -> owner.(*changefeed).Tick
+tiflow/cdc/owner/changefeed.go:273            -> owner.(*changefeed).tick
+tiflow/cdc/owner/changefeed.go:413            -> owner.(*changefeed).initialize
+
+
+processorManager
+tiflow/cdc/capture/capture.go:374             -> capture.(*captureImpl).run
+tiflow/cdc/capture/capture.go:520             -> capture.(*captureImpl).runEtcdWorker
+tiflow/pkg/orchestrator/etcd_worker.go:290    -> orchestrator.(*EtcdWorker).Run
+tiflow/cdc/processor/manager.go:142           -> processor.(*managerImpl).Tick
+tiflow/cdc/processor/processor.go:595         -> processor.(*processor).Tick
+
+
+** write data into DB
+tiflow/cdc/capture/capture.go:374                      -> capture.(*captureImpl).run
+tiflow/cdc/capture/capture.go:520                      -> capture.(*captureImpl).runEtcdWorker
+tiflow/pkg/orchestrator/etcd_worker.go:290             -> orchestrator.(*EtcdWorker).Run
+tiflow/cdc/processor/manager.go:142                    -> processor.(*managerImpl).Tick
+tiflow/cdc/processor/processor.go:617                  -> processor.(*processor).Tick
+tiflow/cdc/processor/processor.go:689                  -> processor.(*processor).tick
+tiflow/cdc/processor/processor.go:826                  -> processor.(*processor).lazyInitImpl
+tiflow/cdc/processor/sinkmanager/manager.go:121        -> sinkmanager.New
+tiflow/cdc/sinkv2/eventsink/factory/factory.go:62      -> factory.New
+tiflow/cdc/sinkv2/eventsink/txn/txn_sink.go:86         -> txn.NewMySQLSink
+tiflow/cdc/sinkv2/eventsink/txn/txn_sink.go:57         -> txn.newSink
+tiflow/cdc/sinkv2/eventsink/txn/worker.go:110          -> runBackgroundLoop
+tiflow/cdc/sinkv2/eventsink/txn/worker.go:163          -> txn.(*worker).runBackgroundLoop 
+tiflow/cdc/sinkv2/eventsink/txn/worker.go:209          -> txn.(*worker).doFlush
+tiflow/cdc/sinkv2/eventsink/txn/mysql/mysql.go:138     -> mysql.(*mysqlBackend).Flush
+
+
+
+tiflow/pkg/causality/conflict_detector.go:68           -> causality.NewConflictDetector
+tiflow/pkg/causality/conflict_detector.go:109          -> causality.(*ConflictDetector[...]).runBackgroundTasks
+tiflow/pkg/causality/internal/node.go:236              -> internal.(*Node).maybeResolve.func1
+tiflow/pkg/causality/internal/node.go:213              -> internal.(*Node).assignTo
+tiflow/pkg/causality/conflict_detector.go:85           -> causality.(*ConflictDetector[...]).Add.func1
+tiflow/pkg/causality/conflict_detector.go:129          -> causality.(*ConflictDetector[...]).sendToWorker
+tiflow/cdc/sinkv2/eventsink/txn/worker.go:91           -> txn.(*worker).Add
+
+
+*** Details
+#+BEGIN_SRC
+                        case txn := <-w.txnCh.Out():
+                                w.hasPending = true
+                                log.Info("events 001", zap.String("txn", fmt.Sprintf("%#v %#v %#v %#v %#v", txn.txnEvent.TxnCallbackableEvent.Event.Table, txn.txnEvent.TxnCallbackableEvent.Event.TableInfo, txn.txnEvent.TxnCallbackableEvent.Event.StartTs, txn.txnEvent.TxnCallbackableEvent.Event.CommitTs, txn.txnEvent.TxnCallbackableEvent.Event.Rows)))
+                                if w.onEvent(txn) && w.doFlush(&flushTimeSlice) {
+                                        break Loop
+                                }
+#+END_SRC
+txn="&model.TableName{Schema:\"test\", Table:\"test01\", TableID:88, IsPartition:false} &model.TableInfo{TableInfo:(*model.TableInfo)(0xc000e4cb60), SchemaID:2, TableName:model.TableName{Schema:\"test\", Table:\"test01\", TableID:88, IsPartition:false}, Version:0x618d520e9380003, columnsOffset:map[int64]int{1:0}, indicesOffset:map[int64]int{}, uniqueColumns:map[int64]struct {}{1:struct {}{}}, RowColumnsOffset:map[int64]int{1:0}, ColumnsFlag:map[int64]model.ColumnFlagType{1:0xb}, handleColID:[]int64{1}, HandleIndexID:-1, IndexColumnsOffset:[][]int{[]int{0}}, rowColInfos:[]rowcodec.ColInfo{rowcodec.ColInfo{ID:1, IsPKHandle:true, VirtualGenCol:false, Ft:(*types.FieldType)(0xc0002f5d50)}}, rowColFieldTps:map[int64]*types.FieldType{1:(*types.FieldType)(0xc0002f5d50)}} 0x618d73dd0500005 0x618d73dd0500006 []*model.RowChangedEvent{(*model.RowChangedEvent)(0xc0033fc640)}
+
+

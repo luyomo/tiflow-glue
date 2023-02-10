@@ -17,6 +17,7 @@ import (
 	"context"
 	"runtime"
 	"sync"
+	"fmt"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -114,6 +115,7 @@ func (w *mysqlSinkWorker) run(ctx context.Context) (err error) {
 		if len(toExecRows) == 0 {
 			return nil
 		}
+		log.Info("DEBUG ... ... ", zap.String("value", fmt.Sprintf("%#v", toExecRows) )  )
 		err := w.execDMLs(ctx, toExecRows, w.bucket)
 		if err != nil {
 			txnNum = 0
@@ -134,6 +136,7 @@ func (w *mysqlSinkWorker) run(ctx context.Context) (err error) {
 				return errors.Trace(flushRows())
 			}
 			if txn.FinishWg != nil {
+				log.Info("DEBUG in the FinishWg 001")
 				if err := flushRows(); err != nil {
 					w.hasError.Store(true)
 					txn.FinishWg.Done()
@@ -143,6 +146,7 @@ func (w *mysqlSinkWorker) run(ctx context.Context) (err error) {
 				continue
 			}
 			if len(toExecRows)+len(txn.Rows) > w.maxTxnRow {
+				log.Info("DEBUG in the FinishWg 002")
 				if err := flushRows(); err != nil {
 					txnNum++
 					w.hasError.Store(true)
@@ -152,6 +156,7 @@ func (w *mysqlSinkWorker) run(ctx context.Context) (err error) {
 			toExecRows = append(toExecRows, txn.Rows...)
 			txnNum++
 		case <-w.receiver.C:
+			log.Info("DEBUG in the FinishWg 003")
 			if err := flushRows(); err != nil {
 				w.hasError.Store(true)
 				return errors.Trace(err)

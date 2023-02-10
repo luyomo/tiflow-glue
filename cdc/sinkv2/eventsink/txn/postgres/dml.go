@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mysql
+package postgres
 
 import (
 	"strings"
@@ -81,7 +81,6 @@ func prepareReplace(
 	appendPlaceHolder bool,
 	translateToInsert bool,
 ) (string, []interface{}) {
-	log.Info("DEBUG prepareReplace", zap.Stack("stacktrace"))
 	var builder strings.Builder
 	columnNames := make([]string, 0, len(cols))
 	args := make([]interface{}, 0, len(cols))

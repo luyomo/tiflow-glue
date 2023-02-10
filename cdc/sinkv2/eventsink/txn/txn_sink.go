@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/tiflow/cdc/model"
 	"github.com/pingcap/tiflow/cdc/sinkv2/eventsink"
 	"github.com/pingcap/tiflow/cdc/sinkv2/eventsink/txn/mysql"
+	"github.com/pingcap/tiflow/cdc/sinkv2/eventsink/txn/postgres"
 	"github.com/pingcap/tiflow/cdc/sinkv2/metrics"
 	"github.com/pingcap/tiflow/cdc/sinkv2/tablesink/state"
 	"github.com/pingcap/tiflow/pkg/causality"
@@ -74,6 +75,35 @@ func NewMySQLSink(
 	ctx1, cancel := context.WithCancel(ctx)
 	statistics := metrics.NewStatistics(ctx1, psink.TxnSink)
 	backendImpls, err := mysql.NewMySQLBackends(ctx, sinkURI, replicaConfig, getConn, statistics)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	backends := make([]backend, 0, len(backendImpls))
+	for _, impl := range backendImpls {
+		backends = append(backends, impl)
+	}
+	sink := newSink(ctx, backends, errCh, conflictDetectorSlots)
+	sink.statistics = statistics
+	sink.cancel = cancel
+
+	return sink, nil
+}
+
+// NewMySQLSink creates a postgres sink with given parameters.
+func NewPostgresSink(
+	ctx context.Context,
+	sinkURI *url.URL,
+	replicaConfig *config.ReplicaConfig,
+	errCh chan<- error,
+	conflictDetectorSlots uint64,
+) (*sink, error) {
+	var getConn pmysql.Factory = pmysql.CreateMySQLDBConn
+
+	ctx1, cancel := context.WithCancel(ctx)
+	statistics := metrics.NewStatistics(ctx1, psink.TxnSink)
+	backendImpls, err := postgres.NewPostgresBackends(ctx, sinkURI, replicaConfig, getConn, statistics)
 	if err != nil {
 		cancel()
 		return nil, err

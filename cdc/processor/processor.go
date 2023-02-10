@@ -592,6 +592,7 @@ func isProcessorIgnorableError(err error) bool {
 // The main logic of processor is in this function, including the calculation of many kinds of ts,
 // maintain table pipeline, error handling, etc.
 func (p *processor) Tick(ctx cdcContext.Context) error {
+	log.Info("processor->Tick", zap.Stack("tracestack"))
 	// check upstream error first
 	if err := p.upstream.Error(); err != nil {
 		return p.handleErr(err)

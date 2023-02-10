@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mysql
+package postgres
 
 import (
 	"context"
@@ -20,6 +20,11 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
+        "github.com/jackc/pgx/v5"
+        "github.com/jackc/pgx/v5/pgxpool"
 
 	dmysql "github.com/go-sql-driver/mysql"
 	"github.com/pingcap/errors"
@@ -52,7 +57,7 @@ const (
 	defaultDMLMaxRetry uint64 = 8
 )
 
-type mysqlBackend struct {
+type postgresBackend struct {
 	workerID    int
 	changefeed  string
 	db          *sql.DB
@@ -68,13 +73,14 @@ type mysqlBackend struct {
 }
 
 // NewMySQLBackends creates a new MySQL sink using schema storage
-func NewMySQLBackends(
+func NewPostgresBackends(
 	ctx context.Context,
 	sinkURI *url.URL,
 	replicaConfig *config.ReplicaConfig,
 	dbConnFactory pmysql.Factory,
 	statistics *metrics.Statistics,
-) ([]*mysqlBackend, error) {
+) ([]*postgresBackend, error) {
+	log.Info("Reaching into NewPostgresBackends")
 	changefeedID := contextutil.ChangefeedIDFromCtx(ctx)
 	changefeed := fmt.Sprintf("%s.%s", changefeedID.Namespace, changefeedID.ID)
 
@@ -102,9 +108,9 @@ func NewMySQLBackends(
 	db.SetMaxIdleConns(cfg.WorkerCount)
 	db.SetMaxOpenConns(cfg.WorkerCount)
 
-	backends := make([]*mysqlBackend, 0, cfg.WorkerCount)
+	backends := make([]*postgresBackend, 0, cfg.WorkerCount)
 	for i := 0; i < cfg.WorkerCount; i++ {
-		backends = append(backends, &mysqlBackend{
+		backends = append(backends, &postgresBackend{
 			workerID:    i,
 			changefeed:  changefeed,
 			db:          db,
@@ -127,15 +133,14 @@ func NewMySQLBackends(
 
 // OnTxnEvent implements interface backend.
 // It adds the event to the buffer, and return true if it needs flush immediately.
-func (s *mysqlBackend) OnTxnEvent(event *eventsink.TxnCallbackableEvent) (needFlush bool) {
+func (s *postgresBackend) OnTxnEvent(event *eventsink.TxnCallbackableEvent) (needFlush bool) {
 	s.events = append(s.events, event)
 	s.rows += len(event.Event.Rows)
 	return event.Event.ToWaitFlush() || s.rows >= s.cfg.MaxTxnRow
 }
 
 // Flush implements interface backend.
-func (s *mysqlBackend) Flush(ctx context.Context) (err error) {
-	log.Info("DEBUG Flush", zap.Stack("tracestack"))
+func (s *postgresBackend) Flush(ctx context.Context) (err error) {
 	if s.rows == 0 {
 		return
 	}
@@ -155,6 +160,7 @@ func (s *mysqlBackend) Flush(ctx context.Context) (err error) {
 	log.Debug("prepare DMLs", zap.Any("rows", s.rows),
 		zap.Strings("sqls", dmls.sqls), zap.Any("values", dmls.values))
 
+	log.Info("Executing insert event")
 	start := time.Now()
 	if err := s.execDMLWithMaxRetries(ctx, dmls); err != nil {
 		if errors.Cause(err) != context.Canceled {
@@ -182,7 +188,7 @@ func (s *mysqlBackend) Flush(ctx context.Context) (err error) {
 }
 
 // Close implements interface backend.
-func (s *mysqlBackend) Close() (err error) {
+func (s *postgresBackend) Close() (err error) {
 	if s.db != nil {
 		err = s.db.Close()
 		s.db = nil
@@ -191,7 +197,7 @@ func (s *mysqlBackend) Close() (err error) {
 }
 
 // MaxFlushInterval implements interface backend.
-func (s *mysqlBackend) MaxFlushInterval() time.Duration {
+func (s *postgresBackend) MaxFlushInterval() time.Duration {
 	return maxFlushInterval
 }
 
@@ -274,7 +280,7 @@ func convertBinaryToString(row *model.RowChangedEvent) {
 	}
 }
 
-func (s *mysqlBackend) groupRowsByType(
+func (s *postgresBackend) groupRowsByType(
 	event *eventsink.TxnCallbackableEvent,
 	tableInfo *timodel.TableInfo,
 	spiltUpdate bool,
@@ -352,7 +358,7 @@ func (s *mysqlBackend) groupRowsByType(
 	return
 }
 
-func (s *mysqlBackend) batchSingleTxnDmls(
+func (s *postgresBackend) batchSingleTxnDmls(
 	event *eventsink.TxnCallbackableEvent,
 	tableInfo *timodel.TableInfo,
 	translateToInsert bool,
@@ -407,7 +413,7 @@ func hasHandleKey(cols []*model.Column) bool {
 }
 
 // prepareDMLs converts model.RowChangedEvent list to query string list and args list
-func (s *mysqlBackend) prepareDMLs() *preparedDMLs {
+func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 	// TODO: use a sync.Pool to reduce allocations.
 	startTs := make([]uint64, 0, s.rows)
 	sqls := make([]string, 0, s.rows)
@@ -547,12 +553,51 @@ func (s *mysqlBackend) prepareDMLs() *preparedDMLs {
 	}
 }
 
-func (s *mysqlBackend) execDMLWithMaxRetries(pctx context.Context, dmls *preparedDMLs) error {
+func (s *postgresBackend) execDMLWithMaxRetries(pctx context.Context, dmls *preparedDMLs) error {
 	if len(dmls.sqls) != len(dmls.values) {
 		log.Panic("unexpected number of sqls and values",
 			zap.Strings("sqls", dmls.sqls),
 			zap.Any("values", dmls.values))
 	}
+
+	connStr := "postgresql://pguser:1234Abcd@172.82.11.39/test?sslmode=disable"
+        //// urlExample := "postgres://username:password@localhost:5432/database_name"
+	//conn, err := pgx.Connect(context.Background(), connStr)
+	//if err != nil {
+	//	fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+	//	os.Exit(1)
+	//}
+	//defer conn.Close(context.Background())
+
+	log.Info("Inserting data into pg")
+        ctx := context.Background()
+        var db *pgxpool.Pool
+
+        db, err := pgxpool.New(ctx, connStr)
+        defer db.Close()
+        if err != nil {
+            panic(err)
+        }
+
+//        tx, err := db.Begin(ctx)
+//        if err != nil {
+//            panic(err)
+//        }
+//
+//        batch := &pgx.Batch{}
+//        batch.Queue("insert into test01(col01) values($1)", 2)
+//        br := tx.SendBatch(context.Background(), batch)
+//
+//        var berr error
+//        var result pgconn.CommandTag
+//        for berr == nil {
+//            result, berr = br.Exec()
+//            log.Info("result", zap.String("postgres batch", result.String() )  )
+//        }
+//	br.Close()
+//
+//        tx.Commit(ctx)
+
 
 	start := time.Now()
 	return retry.Do(pctx, func() error {
@@ -575,12 +620,23 @@ func (s *mysqlBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prepare
 					cerror.WrapError(cerror.ErrMySQLTxnError, err),
 					start, s.changefeed, "BEGIN", dmls.rowCount, dmls.startTs)
 			}
+			
+			// Postgres: transaction generation
+                        pgtx, err := db.Begin(ctx)
+			if err != nil {
+				return 0, logDMLTxnErr(
+					cerror.WrapError(cerror.ErrMySQLTxnError, err),
+					start, s.changefeed, "BEGIN", dmls.rowCount, dmls.startTs)
+			}
+                        batch := &pgx.Batch{}
 
 			for i, query := range dmls.sqls {
 				args := dmls.values[i]
+				log.Info("mysql parameter", zap.String("param", fmt.Sprintf("%#v", args)))
 				log.Debug("exec row", zap.Int("workerID", s.workerID),
 					zap.String("sql", query), zap.Any("args", args))
 				ctx, cancelFunc := context.WithTimeout(pctx, writeTimeout)
+				// Insert data into mysql
 				if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 					err := logDMLTxnErr(
 						cerror.WrapError(cerror.ErrMySQLTxnError, err),
@@ -594,7 +650,25 @@ func (s *mysqlBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prepare
 					return 0, err
 				}
 				cancelFunc()
+
+				// postgres: insert data
+				pgquery := strings.Replace(strings.Replace(strings.Replace(query, "`", "", -1), "?", "$1", -1), "REPLACE", "INSERT", -1)
+				log.Info("pg query", zap.String("query", pgquery))
+				log.Info("pg parameter", zap.String("param", fmt.Sprintf("%#v", args)))
+                                batch.Queue(pgquery, args...)
 			}
+
+			// postgres: batch data insert
+                        br := pgtx.SendBatch(context.Background(), batch)
+                        var berr error
+                        var result pgconn.CommandTag
+                        for berr == nil {
+                            result, berr = br.Exec()
+                            log.Info("result", zap.String("postgres batch", result.String() )  )
+                 //           log.Info("result err", zap.String("postgres error",berr.Error() )  )
+                        }
+	                br.Close()
+
 
 			// we set write source for each txn,
 			// so we can use it to trace the data source
@@ -618,6 +692,9 @@ func (s *mysqlBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prepare
 					cerror.WrapError(cerror.ErrMySQLTxnError, err),
 					start, s.changefeed, "COMMIT", dmls.rowCount, dmls.startTs)
 			}
+			// postgres: commit data
+                        pgtx.Commit(ctx)
+
 			return dmls.rowCount, nil
 		})
 		if err != nil {
@@ -680,12 +757,12 @@ func getSQLErrCode(err error) (errors.ErrCode, bool) {
 }
 
 // Only for testing.
-func (s *mysqlBackend) setDMLMaxRetry(maxRetry uint64) {
+func (s *postgresBackend) setDMLMaxRetry(maxRetry uint64) {
 	s.dmlMaxRetry = maxRetry
 }
 
 // setWriteSource sets write source for the transaction.
-func (s *mysqlBackend) setWriteSource(ctx context.Context, txn *sql.Tx) error {
+func (s *postgresBackend) setWriteSource(ctx context.Context, txn *sql.Tx) error {
 	// we only set write source when donwstream is TiDB
 	if !s.cfg.IsTiDB {
 		return nil

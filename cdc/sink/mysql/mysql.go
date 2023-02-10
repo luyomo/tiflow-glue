@@ -835,6 +835,7 @@ func (s *mysqlSink) execDMLs(ctx context.Context, rows []*model.RowChangedEvent,
 	})
 	s.statistics.ObserveRows(rows...)
 	dmls := s.prepareDMLs(rows)
+	log.Info("Running on the execDMLs ")
 	log.Debug("prepare DMLs", zap.Any("rows", rows), zap.Strings("sqls", dmls.sqls), zap.Any("values", dmls.values))
 	if err := s.execDMLWithMaxRetries(ctx, dmls, bucket); err != nil {
 		if errors.Cause(err) != context.Canceled {

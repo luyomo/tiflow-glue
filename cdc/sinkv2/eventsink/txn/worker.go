@@ -107,6 +107,7 @@ func (w *worker) Close() {
 
 // Run a background loop.
 func (w *worker) runBackgroundLoop() {
+	log.Info("DEBUG runBackgroundLoop", zap.Stack("tracestack"))
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
