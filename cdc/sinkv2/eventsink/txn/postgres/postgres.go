@@ -577,13 +577,6 @@ func (s *postgresBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prep
 	}
 
 	connStr := "postgresql://pguser:1234Abcd@172.82.11.39/test?sslmode=disable"
-        //// urlExample := "postgres://username:password@localhost:5432/database_name"
-	//conn, err := pgx.Connect(context.Background(), connStr)
-	//if err != nil {
-	//	fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
-	//	os.Exit(1)
-	//}
-	//defer conn.Close(context.Background())
 
 	log.Info("Inserting data into pg")
         ctx := context.Background()
@@ -594,26 +587,6 @@ func (s *postgresBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prep
         if err != nil {
             panic(err)
         }
-
-//        tx, err := db.Begin(ctx)
-//        if err != nil {
-//            panic(err)
-//        }
-//
-//        batch := &pgx.Batch{}
-//        batch.Queue("insert into test01(col01) values($1)", 2)
-//        br := tx.SendBatch(context.Background(), batch)
-//
-//        var berr error
-//        var result pgconn.CommandTag
-//        for berr == nil {
-//            result, berr = br.Exec()
-//            log.Info("result", zap.String("postgres batch", result.String() )  )
-//        }
-//	br.Close()
-//
-//        tx.Commit(ctx)
-
 
 	start := time.Now()
 	return retry.Do(pctx, func() error {
@@ -636,7 +609,7 @@ func (s *postgresBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prep
 					cerror.WrapError(cerror.ErrMySQLTxnError, err),
 					start, s.changefeed, "BEGIN", dmls.rowCount, dmls.startTs)
 			}
-			
+
 			// Postgres: transaction generation
                         pgtx, err := db.Begin(ctx)
 			if err != nil {
@@ -653,24 +626,7 @@ func (s *postgresBackend) execDMLWithMaxRetries(pctx context.Context, dmls *prep
 				log.Info("mysql parameter", zap.String("param", fmt.Sprintf("%#v", args)))
 				log.Debug("exec row", zap.Int("workerID", s.workerID),
 					zap.String("sql", query), zap.Any("args", args))
-				// Insert data into mysql
-				//if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-				//	err := logDMLTxnErr(
-				//		cerror.WrapError(cerror.ErrMySQLTxnError, err),
-				//		start, s.changefeed, query, dmls.rowCount, dmls.startTs)
-				//	if rbErr := tx.Rollback(); rbErr != nil {
-				//		if errors.Cause(rbErr) != context.Canceled {
-				//			log.Warn("failed to rollback txn", zap.Error(rbErr))
-				//		}
-				//	}
-				//	cancelFunc()
-				//	return 0, err
-				//}
-				//cancelFunc()
 
-				//// postgres: insert data
-				//pgquery := strings.Replace(strings.Replace(strings.Replace(query, "`", "", -1), "?", "$1", -1), "REPLACE", "INSERT", -1)
-				//log.Info("pg query", zap.String("query", pgquery))
 				log.Info("pg parameter", zap.String("param", fmt.Sprintf("%#v", args)))
                                 //batch.Queue(pgquery, args...)
                                 batch.Queue(query, args...)

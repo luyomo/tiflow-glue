@@ -23,7 +23,8 @@ import (
 	"github.com/pingcap/tiflow/cdc/sinkv2/ddlsink/cloudstorage"
 	"github.com/pingcap/tiflow/cdc/sinkv2/ddlsink/mq"
 	"github.com/pingcap/tiflow/cdc/sinkv2/ddlsink/mq/ddlproducer"
-	"github.com/pingcap/tiflow/cdc/sinkv2/ddlsink/mysql"
+	//"github.com/pingcap/tiflow/cdc/sinkv2/ddlsink/mysql"
+	"github.com/pingcap/tiflow/cdc/sinkv2/ddlsink/postgres"
 	"github.com/pingcap/tiflow/pkg/config"
 	cerror "github.com/pingcap/tiflow/pkg/errors"
 	"github.com/pingcap/tiflow/pkg/sink"
@@ -48,7 +49,8 @@ func New(
 	case sink.BlackHoleScheme:
 		return blackhole.New(), nil
 	case sink.MySQLSSLScheme, sink.MySQLScheme, sink.TiDBScheme, sink.TiDBSSLScheme:
-		return mysql.NewMySQLDDLSink(ctx, sinkURI, cfg, pmysql.CreateMySQLDBConn)
+		//return mysql.NewMySQLDDLSink(ctx, sinkURI, cfg, pmysql.CreateMySQLDBConn)
+		return postgres.NewPostgresDDLSink(ctx, sinkURI, cfg, pmysql.CreateMySQLDBConn)
 	case sink.S3Scheme, sink.FileScheme, sink.GCSScheme, sink.GSScheme, sink.AzblobScheme, sink.AzureScheme, sink.CloudStorageNoopScheme:
 		return cloudstorage.NewCloudStorageDDLSink(ctx, sinkURI)
 	default:

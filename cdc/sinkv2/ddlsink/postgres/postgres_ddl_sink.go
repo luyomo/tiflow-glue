@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mysql
+package postgres
 
 import (
 	"context"
@@ -19,6 +19,11 @@ import (
 	"net/url"
 	"time"
 	"fmt"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
+        "github.com/jackc/pgx/v5"
+        "github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -36,6 +41,9 @@ import (
 	"github.com/pingcap/tiflow/pkg/sink"
 	pmysql "github.com/pingcap/tiflow/pkg/sink/mysql"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/tidb/types"
+	"github.com/pingcap/tidb/parser/mysql"
 )
 
 const (
@@ -46,9 +54,9 @@ const (
 )
 
 // Assert DDLEventSink implementation
-var _ ddlsink.DDLEventSink = (*mysqlDDLSink)(nil)
+var _ ddlsink.DDLEventSink = (*postgresDDLSink)(nil)
 
-type mysqlDDLSink struct {
+type postgresDDLSink struct {
 	// id indicates which processor (changefeed) this sink belongs to.
 	id model.ChangeFeedID
 	// db is the database connection.
@@ -59,13 +67,13 @@ type mysqlDDLSink struct {
 	statistics *metrics.Statistics
 }
 
-// NewMySQLDDLSink creates a new mysqlDDLSink.
-func NewMySQLDDLSink(
+// NewMySQLDDLSink creates a new postgresDDLSink.
+func NewPostgresDDLSink(
 	ctx context.Context,
 	sinkURI *url.URL,
 	replicaConfig *config.ReplicaConfig,
 	dbConnFactory pmysql.Factory,
-) (*mysqlDDLSink, error) {
+) (*postgresDDLSink, error) {
 	log.Info("DEBUG NewMySQLDDLSink", zap.Stack("stacktrace"))
 	changefeedID := contextutil.ChangefeedIDFromCtx(ctx)
 	cfg := pmysql.NewConfig()
@@ -84,7 +92,7 @@ func NewMySQLDDLSink(
 		return nil, err
 	}
 
-	m := &mysqlDDLSink{
+	m := &postgresDDLSink{
 		id:         changefeedID,
 		db:         db,
 		cfg:        cfg,
@@ -97,14 +105,14 @@ func NewMySQLDDLSink(
 	return m, nil
 }
 
-func (m *mysqlDDLSink) WriteDDLEvent(ctx context.Context, ddl *model.DDLEvent) error {
+func (m *postgresDDLSink) WriteDDLEvent(ctx context.Context, ddl *model.DDLEvent) error {
 	log.Info("DEBUG WriteDDLEvent", zap.Stack("stacktrace"))
 	log.Info("DEBUG DDLEvent", zap.String("ddl event", fmt.Sprintf("%#v", ddl)))
 	err := m.execDDLWithMaxRetries(ctx, ddl)
 	return errors.Trace(err)
 }
 
-func (m *mysqlDDLSink) execDDLWithMaxRetries(ctx context.Context, ddl *model.DDLEvent) error {
+func (m *postgresDDLSink) execDDLWithMaxRetries(ctx context.Context, ddl *model.DDLEvent) error {
 	return retry.Do(ctx, func() error {
 		err := m.statistics.RecordDDLExecution(func() error { return m.execDDL(ctx, ddl) })
 		if err != nil {
@@ -132,7 +140,41 @@ func (m *mysqlDDLSink) execDDLWithMaxRetries(ctx context.Context, ddl *model.DDL
 		retry.WithIsRetryableErr(cerror.IsRetryableError))
 }
 
-func (m *mysqlDDLSink) execDDL(pctx context.Context, ddl *model.DDLEvent) error {
+func (m *postgresDDLSink) execDDL(pctx context.Context, ddl *model.DDLEvent) error {
+        connStr := "postgresql://pguser:1234Abcd@172.82.11.39/test?sslmode=disable"
+
+        log.Info("Inserting data into pg")
+        ctx := context.Background()
+        var db *pgxpool.Pool
+
+        db, err := pgxpool.New(ctx, connStr)
+        defer db.Close()
+        if err != nil {
+            panic(err)
+        }
+        strDDL := m.generateDDL(pctx, ddl)
+	batch := &pgx.Batch{}
+	batch.Queue(strDDL)
+
+        pgtx, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+        br := pgtx.SendBatch(context.Background(), batch)
+        var berr error
+        var result pgconn.CommandTag
+        for berr == nil {
+            result, berr = br.Exec()
+            log.Info("result", zap.String("postgres batch", result.String() )  )
+	    if berr != nil {
+                   log.Info("result err", zap.String("postgres error",berr.Error() )  )
+		   //cancelFunc()
+	    }
+        }
+	br.Close()
+        pgtx.Commit(ctx)
+
 	writeTimeout, _ := time.ParseDuration(m.cfg.WriteTimeout)
 	writeTimeout += networkDriftDuration
 	ctx, cancelFunc := context.WithTimeout(pctx, writeTimeout)
@@ -192,6 +234,102 @@ func (m *mysqlDDLSink) execDDL(pctx context.Context, ddl *model.DDLEvent) error 
 	return nil
 }
 
+func (m *postgresDDLSink) generateDDL(pctx context.Context, ddl *model.DDLEvent) string {
+    value01, value02, value03 := ddl.TableInfo.GetRowColInfos()
+    log.Info("generateDDL", zap.String("value01", fmt.Sprintf("%#v", value01) ))
+    log.Info("generateDDL", zap.String("value02", fmt.Sprintf("%#v", value02) ))
+    for _, fieldType := range value02 {
+        log.Info("generateDDL", zap.String("field type", fmt.Sprintf("%#v", fieldType) ))
+    }
+    log.Info("generateDDL", zap.String("value03", fmt.Sprintf("%#v", value03) ))
+    var arrCol []string
+    for _,  col := range value03 {
+        log.Info("generateDDL", zap.String("col info", fmt.Sprintf("%#v", col) ))
+        log.Info("generateDDL", zap.String("field type", fmt.Sprintf("%#v", *col.Ft) ))
+	colInfo, _ := ddl.TableInfo.GetColumnInfo(col.ID)
+        log.Info("generateDDL", zap.String("col detail info", fmt.Sprintf("%#v", colInfo) ))
+	strCol := fmt.Sprintf("%s %s ", colInfo.Name.L, m.mapDataType(&colInfo.FieldType) )
+	arrCol = append(arrCol, strCol)
+    }
+
+    strPK := m.generatePK(ddl)
+    log.Info("The PK is: ", zap.String("pk", strPK))
+    strCols := strings.Join(arrCol, ",")
+    strGenDDL := fmt.Sprintf("CREATE TABLE %s.%s(%s %s)", ddl.TableInfo.TableName.Schema, ddl.TableInfo.TableName.Table, strCols, strPK)
+    log.Info("postgres ddl: ", zap.String("ddl", strGenDDL))
+    // GetColumnInfo
+//    for _, col := range ddl.TableInfo.cols {
+//        log.Info("columns: ", zap.String("column", fmt.Sprintf("%#v", col ) ))
+//    }
+    return strGenDDL
+}
+
+func (m *postgresDDLSink) generatePK( ddl *model.DDLEvent) string {
+    _, _,  colsInfo := ddl.TableInfo.GetRowColInfos()
+    var arrCol []string
+    for _,  col := range colsInfo {
+	colInfo, _ := ddl.TableInfo.GetColumnInfo(col.ID)
+        log.Info("generateDDL", zap.String("col detail info", fmt.Sprintf("%#v", colInfo) ))
+        if mysql.HasPriKeyFlag(colInfo.FieldType.GetFlag()) {
+	    arrCol = append(arrCol, colInfo.Name.L)
+
+        }
+    }
+    strCols := strings.Join(arrCol, ",")
+    if len(strCols) == 0 {
+        return ""
+    } else {
+        return fmt.Sprintf(", primary key (%s)", strCols)
+    }
+}
+
+
+func (m *postgresDDLSink) mapDataType(fieldType *types.FieldType) string {
+    strNotNull := ""
+    if mysql.HasNotNullFlag(fieldType.GetFlag()) {
+        strNotNull = "not null"
+    }
+
+    switch fieldType.GetType() {
+        case mysql.TypeLong:
+            return fmt.Sprintf("%s %s", " int ", strNotNull)
+        default:
+            return ""
+
+//     TypeUnspecified byte = 0
+//     TypeTiny        byte = 1 // TINYINT
+//     TypeShort       byte = 2 // SMALLINT
+//     TypeLong        byte = 3 // INT
+//     TypeFloat       byte = 4
+//     TypeDouble      byte = 5
+//     TypeNull        byte = 6
+//     TypeTimestamp   byte = 7
+//     TypeLonglong    byte = 8 // BIGINT
+//     TypeInt24       byte = 9 // MEDIUMINT
+//     TypeDate        byte = 10
+//     /* TypeDuration original name was TypeTime, renamed to TypeDuration to resolve the conflict with Go type Time.*/
+//     TypeDuration byte = 11
+//     TypeDatetime byte = 12
+//     TypeYear     byte = 13
+//     TypeNewDate  byte = 14
+//     TypeVarchar  byte = 15
+//     TypeBit      byte = 16
+// 
+//     TypeJSON       byte = 0xf5
+//     TypeNewDecimal byte = 0xf6
+//     TypeEnum       byte = 0xf7
+//     TypeSet        byte = 0xf8
+//     TypeTinyBlob   byte = 0xf9
+//     TypeMediumBlob byte = 0xfa
+//     TypeLongBlob   byte = 0xfb
+//     TypeBlob       byte = 0xfc
+//     TypeVarString  byte = 0xfd
+//     TypeString     byte = 0xfe /* TypeString is char type */
+//     TypeGeometry   byte = 0xff
+
+    }
+}
+
 func needSwitchDB(ddl *model.DDLEvent) bool {
 	if len(ddl.TableInfo.TableName.Schema) == 0 {
 		return false
@@ -202,13 +340,13 @@ func needSwitchDB(ddl *model.DDLEvent) bool {
 	return true
 }
 
-func (m *mysqlDDLSink) WriteCheckpointTs(_ context.Context, _ uint64, _ []*model.TableInfo) error {
+func (m *postgresDDLSink) WriteCheckpointTs(_ context.Context, _ uint64, _ []*model.TableInfo) error {
 	// Only for RowSink for now.
 	return nil
 }
 
 // Close closes the database connection.
-func (m *mysqlDDLSink) Close() error {
+func (m *postgresDDLSink) Close() error {
 	if err := m.db.Close(); err != nil {
 		return errors.Trace(err)
 	}
