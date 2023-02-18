@@ -1,0 +1,48 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+syntax = "proto3";
+package proto;
+option go_package = "./";
+
+message TableName {
+    string Schema = 1;
+    string Table = 2;
+    int64 TableID = 3; 
+    bool IsPartition = 4;
+}
+
+message ColInfo {
+    int64 ID = 1;
+    bool IsPKHandle = 2;
+    bool VirtualGenCol = 3;
+    // Ft
+}
+
+message RowChangeEvent {
+    uint64 StartTs = 1;
+    uint64 CommitTs = 2;
+    int64 RowID = 3;
+    repeated ColInfo ColInfos = 4;   
+}
+
+message GetRequest {
+    string key = 1;
+    string value=2;
+}
+
+message GetResponse {
+    bytes value = 1;
+}
+
+message PutRequest {
+    TableName TableName = 1;
+    repeated RowChangeEvent RowChangeEvent = 2;
+}
+
+message Empty {}
+
+service KV {
+    rpc Get(GetRequest) returns (GetResponse);
+    rpc Put(PutRequest) returns (Empty);
+}

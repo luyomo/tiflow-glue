@@ -255,6 +255,7 @@ func (s *server) startActorSystems(ctx context.Context) error {
 
 // Run runs the server.
 func (s *server) Run(ctx context.Context) error {
+	log.Info("DEBUG: Server run", zap.Stack("tracestack"))
 	if err := s.prepare(ctx); err != nil {
 		return err
 	}

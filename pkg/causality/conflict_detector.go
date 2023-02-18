@@ -19,6 +19,9 @@ import (
 	"github.com/pingcap/tiflow/engine/pkg/containers"
 	"github.com/pingcap/tiflow/pkg/causality/internal"
 	"go.uber.org/atomic"
+
+	"go.uber.org/zap"
+	"github.com/pingcap/log"
 )
 
 // ConflictDetector implements a logic that dispatches transaction
@@ -53,6 +56,7 @@ func NewConflictDetector[Worker worker[Txn], Txn txnEvent](
 	workers []Worker,
 	numSlots uint64,
 ) *ConflictDetector[Worker, Txn] {
+	log.Info("DEBUG: NewConflictDetector", zap.Stack("tracestack"))
 	ret := &ConflictDetector[Worker, Txn]{
 		workers:       workers,
 		slots:         internal.NewSlots[*internal.Node](numSlots),

@@ -438,22 +438,18 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 	// we only translate into insert when old value is enabled and safe mode is disabled
 	translateToInsert := s.cfg.EnableOldValue && !s.cfg.SafeMode
 
-	log.Info("DEBUG: prepareDMLs 001")
 	rowCount := 0
 	for _, event := range s.events {
-	        log.Info("DEBUG: prepareDMLs 002")
 		if len(event.Event.Rows) == 0 {
 			continue
 		}
 		rowCount += len(event.Event.Rows)
 
-	        log.Info("DEBUG: prepareDMLs 003")
 		firstRow := event.Event.Rows[0]
 		if len(startTs) == 0 || startTs[len(startTs)-1] != firstRow.StartTs {
 			startTs = append(startTs, firstRow.StartTs)
 		}
 
-	        log.Info("DEBUG: prepareDMLs 004")
 		// A row can be translated in to INSERT, when it was committed after
 		// the table it belongs to been replicating by TiCDC, which means it must not be
 		// replicated before, and there is no such row in downstream MySQL.
@@ -469,10 +465,8 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 			callbacks = append(callbacks, event.Callback)
 		}
 
-	        log.Info("DEBUG: prepareDMLs 005")
 		// Determine whether to use batch dml feature here.
 		if s.cfg.BatchDMLEnable {
-	                log.Info("DEBUG: prepareDMLs 006")
 			tableColumns := firstRow.Columns
 			if firstRow.IsDelete() {
 				tableColumns = firstRow.PreColumns
@@ -488,10 +482,8 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 			}
 		}
 
-                log.Info("DEBUG: prepareDMLs 007")
 		quoteTable := firstRow.Table.QuoteString()
 		for _, row := range event.Event.Rows {
-                        log.Info("DEBUG: prepareDMLs 008")
 			var query string
 			var args []interface{}
 			// If the old value is enabled, is not in safe mode and is an update event, then translate to UPDATE.
@@ -506,7 +498,6 @@ func (s *postgresBackend) prepareDMLs() *preparedDMLs {
 				}
 				continue
 			}
-                        log.Info("DEBUG: prepareDMLs 009")
 
 			// Case for update event or delete event.
 			// For update event:

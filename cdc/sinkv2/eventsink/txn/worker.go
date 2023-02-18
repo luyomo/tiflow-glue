@@ -28,6 +28,13 @@ import (
 	cerror "github.com/pingcap/tiflow/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+
+//	"os"
+//        "os/exec"
+
+//        "github.com/hashicorp/go-plugin"
+        //"github.com/hashicorp/go-plugin/examples/grpc/shared"
+//        "github.com/pingcap/tiflow/cdc/sinkv2/eventsink/txn/plugins/shared"
 )
 
 type txnWithNotifier struct {
@@ -89,7 +96,45 @@ func newWorker(ctx context.Context, ID int, backend backend, errCh chan<- error,
 // In other words, it maybe advances the conflict detector.
 func (w *worker) Add(txn *txnEvent, unlock func()) {
 	w.txnCh.In() <- txnWithNotifier{txn, unlock}
+//        w.sendToPlugin(txn, unlock)
 }
+
+//func (w *worker) sendToPlugin(txn *txnEvent, unlock func()) {
+//    log.Info("DEBUG: txn event", zap.String("txn", fmt.Sprintf("%#v", *txn)))
+//    log.Info("DEBUG: callback event", zap.String("txn", fmt.Sprintf("%#v", *txn.TxnCallbackableEvent)))
+//
+//    // We're a host. Start by launching the plugin process.
+//    client := plugin.NewClient(&plugin.ClientConfig{
+//            HandshakeConfig: shared.Handshake,
+//            Plugins:         shared.PluginMap,
+//            Cmd:             exec.Command("sh", "-c", os.Getenv("KV_PLUGIN")),
+//            AllowedProtocols: []plugin.Protocol{
+//                    plugin.ProtocolNetRPC, plugin.ProtocolGRPC},
+//    })
+//    defer client.Kill()
+//
+//    // Connect via RPC
+//    rpcClient, err := client.Client()
+//    if err != nil {
+//	log.Info("DEBUG: Error:", zap.String("client", err.Error()))
+//        os.Exit(1)
+//    }
+//
+//    // Request the plugin
+//    raw, err := rpcClient.Dispense("kv_grpc")
+//    if err != nil {
+//	log.Info("DEBUG: Error:", zap.String("raw", err.Error()))
+//        os.Exit(1)
+//    }
+//    kv := raw.(shared.KV)
+//
+//    err = kv.Put("test", []byte("This is the value") )
+//    if err != nil {
+//	log.Info("DEBUG: Error:", zap.String("Put", err.Error()))
+//        os.Exit(1)
+//    }
+//    log.Info("DEBUG: plugin calling")
+//}
 
 func (w *worker) Close() {
 	log.Info("Closing txn worker",

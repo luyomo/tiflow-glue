@@ -45,6 +45,36 @@ tiflow/cdc/sinkv2/eventsink/txn/mysql/mysql.go:138     -> mysql.(*mysqlBackend).
 
 
 
+------
+
+
+tiflow/pkg/cmd/cmd.go:50                               -> cmd.Run
+github.com/spf13/cobra@v1.6.1/command.go:968           -> cobra.(*Command).Execute
+github.com/spf13/cobra@v1.6.1/command.go:1044          -> cobra.(*Command).ExecuteC
+github.com/spf13/cobra@v1.6.1/command.go:916           -> cobra.(*Command).execute
+tiflow/pkg/cmd/server/server.go:306                    -> server.NewCmdServer.func1
+tiflow/pkg/cmd/server/server.go:157                    -> server.(*options).run
+tiflow/cdc/server/server.go:258                        -> server.(*server).Run
+
+tiflow/cdc/server/server.go:257                        -> server.(*server).Run
+tiflow/cdc/server/server.go:356 +0x2d                  -> server.(*server).run.func1()
+tiflow/cdc/capture/capture.go:303 +0x185               -> capture.(*captureImpl).Run(0xc000c17b00, {0x4a238c8, 0xc002182680})
+tiflow/cdc/capture/capture.go:319 +0x65                -> capture.(*captureImpl).run(0xc000c17b00, {0x4a238c8, 0xc0021828c0})
+
+golang.org/x/sync@v0.1.0/errgroup/errgroup.go:75"      -> errgroup.(*Group).Go.func1
+tiflow/cdc/capture/capture.go:374                      -> capture.(*captureImpl).run.func3
+tiflow/cdc/capture/capture.go:520                      -> capture.(*captureImpl).runEtcdWorker
+tiflow/pkg/orchestrator/etcd_worker.go:290             -> orchestrator.(*EtcdWorker).Run
+tiflow/cdc/processor/manager.go:142                    -> processor.(*managerImpl).Tick
+tiflow/cdc/processor/processor.go:617                  -> processor.(*processor).Tick
+tiflow/cdc/processor/processor.go:689                  -> processor.(*processor).tick
+tiflow/cdc/processor/processor.go:826                  -> processor.(*processor).lazyInitImpl
+tiflow/cdc/processor/sinkmanager/manager.go:121        -> sinkmanager.New
+tiflow/cdc/sinkv2/eventsink/factory/factory.go:62      -> factory.New
+tiflow/cdc/sinkv2/eventsink/txn/txn_sink.go:116        -> txn.NewPostgresSink
+tiflow/cdc/sinkv2/eventsink/txn/txn_sink.go:61         -> txn.newSink
+tiflow/pkg/causality/conflict_detector.go:59           -> causality.NewConflictDetector
+
 tiflow/pkg/causality/conflict_detector.go:68           -> causality.NewConflictDetector
 tiflow/pkg/causality/conflict_detector.go:109          -> causality.(*ConflictDetector[...]).runBackgroundTasks
 tiflow/pkg/causality/internal/node.go:236              -> internal.(*Node).maybeResolve.func1
@@ -53,6 +83,16 @@ tiflow/pkg/causality/conflict_detector.go:85           -> causality.(*ConflictDe
 tiflow/pkg/causality/conflict_detector.go:129          -> causality.(*ConflictDetector[...]).sendToWorker
 tiflow/cdc/sinkv2/eventsink/txn/worker.go:91           -> txn.(*worker).Add
 
+*** Write event
+tiflow/cdc/processor/sinkmanager/manager.go:180             -> sinkmanager.(*SinkManager).startWorkers.func1
+tiflow/cdc/processor/sinkmanager/table_sink_worker.go:72    -> sinkmanager.(*sinkWorker).handleTasks
+tiflow/cdc/processor/sinkmanager/table_sink_worker.go:306   -> sinkmanager.(*sinkWorker).handleTask
+tiflow/cdc/processor/sinkmanager/table_sink_worker.go:190   -> sinkmanager.(*sinkWorker).handleTask.func3
+tiflow/cdc/processor/sinkmanager/table_sink_worker.go:153   -> sinkmanager.(*sinkWorker).handleTask.func2
+tiflow/cdc/processor/sinkmanager/table_sink_worker.go:441   -> sinkmanager.(*sinkWorker).advanceTableSink
+tiflow/cdc/processor/sinkmanager/table_sink_wrapper.go:171  -> sinkmanager.(*tableSinkWrapper).updateResolvedTs
+tiflow/cdc/sinkv2/tablesink/table_sink_impl.go:117          -> tablesink.(*EventTableSink[...]).UpdateResolvedTs
+tiflow/cdc/sinkv2/eventsink/txn/txn_sink.go:129             -> txn.(*sink).WriteEvents
 
 *** Details
 #+BEGIN_SRC
@@ -178,3 +218,12 @@ rowcodec.ColInfo{ID:1, IsPKHandle:true, VirtualGenCol:false, Ft:(*types.FieldTyp
 rowcodec.ColInfo{ID:2, IsPKHandle:false, VirtualGenCol:false, Ft:(*types.FieldType)(0xc004d8d960)}
     types.FieldType{tp:0x3, flag:0x0, flen:11, decimal:0, charset:\"binary\", collate:\"binary\", elems:[]string(nil), elemsIsBinaryLit:[]bool(nil)}
     &model.ColumnInfo{ID:2, Name:model.CIStr{O:\"col02\", L:\"col02\"}, Offset:1, OriginDefaultValue:interface {}(nil), OriginDefaultValueBit:[]uint8(nil), DefaultValue:interface {}(nil), DefaultValueBit:[]uint8(nil), DefaultIsExpr:false, GeneratedExprString:\"\", GeneratedStored:false, Dependences:map[string]struct {}(nil), FieldType:types.FieldType{tp:0x3, flag:0x0, flen:11, decimal:0, charset:\"binary\", collate:\"binary\", elems:[]string(nil), elemsIsBinaryLit:[]bool(nil)}, State:0x5, Comment:\"\", Hidden:false, ChangeStateInfo:(*model.ChangeStateInfo)(nil), Version:0x2}"
+
+** How to add proto
+#+BEGIN_SRC
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.28
+export PATH="$PATH:$(go env GOPATH)/bin"
+~/bin/protoc --go_out=. --go_opt=paths=source_relative     --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/kv.proto
+
+go build -o postgres-sink ./postgres
+#+END_SRC
